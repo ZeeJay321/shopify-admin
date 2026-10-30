@@ -87,6 +87,7 @@ const PRODUCT_HEALTH_LIST = `#graphql
         id
         title
         handle
+        vendor
         status
         description
         onlineStoreUrl
@@ -187,6 +188,7 @@ const PRODUCT_HEALTH_DETAIL = `#graphql
       id
       title
       handle
+      vendor
       status
       description
       onlineStoreUrl

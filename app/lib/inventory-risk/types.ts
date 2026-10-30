@@ -9,6 +9,8 @@ export type LocationLevel = {
 
 export type VariantInventory = {
   variantId: string;
+  /** Numeric inventory item id (for stock adjustments). */
+  inventoryItemId: string;
   variantTitle: string;
   productId: string;
   productTitle: string;

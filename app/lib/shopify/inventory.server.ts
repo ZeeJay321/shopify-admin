@@ -11,6 +11,7 @@ import {
 } from "../config";
 import type { VariantInventory } from "../inventory-risk/types";
 import type {
+  InventoryLevelAvailableQuery,
   InventoryLocationsQuery,
   InventoryVariantsQuery,
 } from "../../types/admin.generated";
@@ -181,11 +182,16 @@ type VariantNode = InventoryVariantsQuery["productVariants"]["nodes"][number];
 export function toVariantInventory(node: VariantNode): VariantInventory[] {
   const variantId = numericIdFromGid(node.id, "ProductVariant");
   const productId = numericIdFromGid(node.product.id, "Product");
-  if (!variantId || !productId) return [];
+  const inventoryItemId = numericIdFromGid(
+    node.inventoryItem.id,
+    "InventoryItem",
+  );
+  if (!variantId || !productId || !inventoryItemId) return [];
 
   return [
     {
       variantId,
+      inventoryItemId,
       variantTitle: node.title,
       productId,
       productTitle: node.product.title,
@@ -199,4 +205,33 @@ export function toVariantInventory(node: VariantNode): VariantInventory[] {
       }),
     },
   ];
+}
+
+// --- Single level (conflict reload) -------------------------------------------
+
+const INVENTORY_LEVEL_AVAILABLE = `#graphql
+  query InventoryLevelAvailable($itemId: ID!, $locationId: ID!) {
+    inventoryItem(id: $itemId) {
+      inventoryLevel(locationId: $locationId) {
+        quantities(names: ["available"]) { name quantity }
+      }
+    }
+  }
+`;
+
+/** Current "available" quantity at one location; null if not stocked there. */
+export async function getAvailableQuantity(
+  client: AdminGraphqlClient,
+  itemGid: string,
+  locationGid: string,
+): Promise<number | null> {
+  const data = await runQuery<InventoryLevelAvailableQuery>(
+    client,
+    "Inventory level",
+    INVENTORY_LEVEL_AVAILABLE,
+    { itemId: itemGid, locationId: locationGid },
+  );
+  const level = data.inventoryItem?.inventoryLevel;
+  if (!level) return null;
+  return level.quantities.find((q) => q.name === "available")?.quantity ?? 0;
 }

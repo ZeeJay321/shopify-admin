@@ -5,6 +5,9 @@ export {
   GROUPS,
   WEIGHTS,
   MIN_DESCRIPTION_LENGTH,
+  MAX_SEO_TITLE_LENGTH,
+  MIN_SEO_DESCRIPTION_LENGTH,
+  MAX_SEO_DESCRIPTION_LENGTH,
 } from "./score";
 export { aggregateStoreHealth, topIssues } from "./aggregate";
 export type { IssueCount, StoreHealth } from "./aggregate";

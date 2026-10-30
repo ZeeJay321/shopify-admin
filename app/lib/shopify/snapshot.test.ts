@@ -7,6 +7,7 @@ function node(overrides: Partial<ProductNode> = {}): ProductNode {
     id: "gid://shopify/Product/7",
     title: "Hoodie",
     handle: "hoodie",
+    vendor: "ZJ",
     status: "ACTIVE" as ProductNode["status"],
     description: "Warm.",
     onlineStoreUrl: "https://zj.example/products/hoodie",

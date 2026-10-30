@@ -71,6 +71,7 @@ describe("getInventoryPage", () => {
 
     expect(page.variants[0]).toEqual({
       variantId: "0",
+      inventoryItemId: "500",
       variantTitle: "Size 0",
       productId: "100",
       productTitle: "Tee 0",

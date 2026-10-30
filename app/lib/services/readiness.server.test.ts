@@ -26,6 +26,7 @@ const OTHER = "b.myshopify.com";
 const record: ProductRecord = {
   snapshot: perfectProduct({ id: "gid://shopify/Product/42" }),
   handle: "hoodie",
+  vendor: "ZJ",
   imageUrl: null,
   imageAlt: null,
   inventoryItemIds: ["9001"],

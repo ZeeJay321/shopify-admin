@@ -1,4 +1,9 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
+import type {
+  ActionFunctionArgs,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
 import { useLoaderData, useNavigation, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -17,6 +22,17 @@ import {
 import { toLoaderError } from "../lib/shopify/errors";
 import { getLocations } from "../lib/shopify/inventory.server";
 import { ErrorBanner } from "../components/health-ui";
+import { writeAccess } from "../lib/shopify/scopes";
+import {
+  inventoryActionHandlers,
+  runWriteAction,
+} from "../lib/services/actions/index.server";
+import type { AdjustTarget } from "../components/actions/inventory-adjust";
+import {
+  ADJUST_MODAL,
+  InventoryAdjustModal,
+} from "../components/actions/inventory-adjust";
+import { WriteAccessBanner } from "../components/actions/shared";
 
 const RISK_LEVELS: RiskLevel[] = ["critical", "low", "healthy", "untracked"];
 
@@ -43,6 +59,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const cursor = params.get("cursor");
   const direction = params.get("dir") === "prev" ? "prev" : "next";
   const filters = { risk, locationId };
+  const canWrite = writeAccess(session.scope).inventory;
 
   try {
     const [summary, page, { locations }] = await Promise.all([
@@ -64,6 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       pageInfo: page.pageInfo,
       locations,
       filters,
+      canWrite,
     };
   } catch (error) {
     return {
@@ -74,14 +92,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       pageInfo: null,
       locations: [],
       filters,
+      canWrite,
     };
   }
 };
+
+/** POST only: adjust_inventory (compare-and-set via Shopify). */
+export const action = ({ request }: ActionFunctionArgs) =>
+  runWriteAction(request, {
+    authenticate: authenticate.admin,
+    cache: appCache,
+    handlers: inventoryActionHandlers,
+  });
 
 function toRow(r: VariantRisk) {
   return {
     key: r.variant.variantId,
     variantId: r.variant.variantId,
+    inventoryItemId: r.variant.inventoryItemId,
     productId: r.variant.productId,
     productTitle: r.variant.productTitle,
     variantTitle: r.variant.variantTitle,
@@ -98,8 +126,17 @@ function toRow(r: VariantRisk) {
 type Row = ReturnType<typeof toRow>;
 
 export default function InventoryRisk() {
-  const { error, summary, rows, pageRowCount, pageInfo, locations, filters } =
-    useLoaderData<typeof loader>();
+  const {
+    error,
+    summary,
+    rows,
+    pageRowCount,
+    pageInfo,
+    locations,
+    filters,
+    canWrite,
+  } = useLoaderData<typeof loader>();
+  const [adjustTarget, setAdjustTarget] = useState<AdjustTarget | null>(null);
   const [, setSearchParams] = useSearchParams();
   const loading = useNavigation().state === "loading";
   const locationName = locations.find((l) => l.id === filters.locationId)?.name;
@@ -130,6 +167,7 @@ export default function InventoryRisk() {
       </s-link>
 
       {error && <ErrorBanner error={error} />}
+      {!error && !canWrite && <WriteAccessBanner action="adjust stock" />}
       {error?.kind === "access_denied" && (
         <s-banner tone="info" heading="New permissions needed">
           Inventory Risk needs the read inventory and read locations
@@ -226,11 +264,25 @@ export default function InventoryRisk() {
             </s-table-header>
             <s-table-header>By location</s-table-header>
             <s-table-header listSlot="inline">Risk</s-table-header>
-            <s-table-header>Shopify Admin</s-table-header>
+            <s-table-header>Actions</s-table-header>
           </s-table-header-row>
           <s-table-body>
             {rows.map((row) => (
-              <InventoryRow key={row.key} row={row} />
+              <InventoryRow
+                key={row.key}
+                row={row}
+                canWrite={canWrite}
+                onAdjust={() =>
+                  setAdjustTarget({
+                    productId: row.productId,
+                    productTitle: row.productTitle,
+                    variantTitle: row.variantTitle,
+                    inventoryItemId: row.inventoryItemId,
+                    locations: row.locations,
+                    defaultLocationId: filters.locationId,
+                  })
+                }
+              />
             ))}
           </s-table-body>
         </s-table>
@@ -248,6 +300,8 @@ export default function InventoryRisk() {
         )}
       </s-section>
 
+      {canWrite && <InventoryAdjustModal target={adjustTarget} />}
+
       {filters.risk && pageRowCount > 0 && (
         <s-text color="subdued">
           Showing {rows.length} of {pageRowCount} variants on this page with
@@ -258,7 +312,16 @@ export default function InventoryRisk() {
   );
 }
 
-function InventoryRow({ row }: { row: Row }) {
+function InventoryRow({
+  row,
+  canWrite,
+  onAdjust,
+}: {
+  row: Row;
+  canWrite: boolean;
+  onAdjust: () => void;
+}) {
+  const adjustable = row.risk !== "untracked" && row.locations.length > 0;
   const breakdown =
     row.locations.length === 0
       ? "Not stocked"
@@ -282,12 +345,23 @@ function InventoryRow({ row }: { row: Row }) {
         <s-badge tone={RISK_TONES[row.risk]}>{RISK_LABELS[row.risk]}</s-badge>
       </s-table-cell>
       <s-table-cell>
-        <s-link
-          href={`shopify://admin/products/${row.productId}/variants/${row.variantId}`}
-          target="_top"
-        >
-          Open variant
-        </s-link>
+        <s-stack direction="inline" gap="small" alignItems="center">
+          <s-button
+            variant="tertiary"
+            disabled={!canWrite || !adjustable}
+            commandFor={ADJUST_MODAL}
+            command="--show"
+            onClick={onAdjust}
+          >
+            {adjustable ? "Adjust stock" : "Not tracked"}
+          </s-button>
+          <s-link
+            href={`shopify://admin/products/${row.productId}/variants/${row.variantId}`}
+            target="_top"
+          >
+            Open variant
+          </s-link>
+        </s-stack>
       </s-table-cell>
     </s-table-row>
   );

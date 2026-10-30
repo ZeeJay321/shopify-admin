@@ -9,10 +9,15 @@ import { authenticate } from "../shopify.server";
 import { appCache } from "../lib/cache/index.server";
 import { HEALTH_SAMPLE_CAP } from "../lib/config";
 import { scoreTone } from "../lib/product-health";
+import { loadReadiness } from "../lib/services/readiness.server";
 import {
-  invalidateReadiness,
-  loadReadiness,
-} from "../lib/services/readiness.server";
+  readinessActionHandlers,
+  runWriteAction,
+} from "../lib/services/actions/index.server";
+import type { WriteActionResult } from "../lib/actions";
+import { writeAccess } from "../lib/shopify/scopes";
+import { SeoBatchAction } from "../components/actions/seo-batch";
+import { WriteAccessBanner } from "../components/actions/shared";
 import { toLoaderError } from "../lib/shopify/errors";
 import type { CheckResult } from "../lib/storefront-readiness";
 import { READINESS_GROUPS } from "../lib/storefront-readiness";
@@ -21,22 +26,30 @@ import { CheckStatusIcon, ErrorBanner } from "../components/health-ui";
 /** Storefront Readiness: weighted checks over products and collections. */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
+  const canWrite = writeAccess(session.scope).products;
   try {
     return {
       error: null,
       report: await loadReadiness(admin, session.shop, appCache),
+      canWrite,
     };
   } catch (error) {
-    return { error: toLoaderError(error), report: null };
+    return { error: toLoaderError(error), report: null, canWrite };
   }
 };
 
-/** "Recheck now": clears only this app's cached report (no Shopify writes). */
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  invalidateReadiness(session.shop, appCache);
-  return { rechecked: true };
-};
+/**
+ * POST only. recheck: clears this app's cached report (no Shopify write).
+ * preview_seo_batch / apply_seo_batch: confirmed SEO fixes (write_products).
+ */
+export const action = ({ request }: ActionFunctionArgs) =>
+  runWriteAction(request, {
+    authenticate: authenticate.admin,
+    cache: appCache,
+    handlers: readinessActionHandlers,
+  });
+
+const SEO_CHECK_IDS = new Set(["seo_titles", "seo_descriptions"]);
 
 const SEVERITY_TONE = {
   critical: "critical",
@@ -45,8 +58,19 @@ const SEVERITY_TONE = {
 } as const;
 
 export default function StorefrontReadiness() {
-  const { error, report } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof action>();
+  const { error, report, canWrite } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<WriteActionResult>();
+  const missingSeoIds = report
+    ? [
+        ...new Set(
+          report.checks
+            .filter((c) => SEO_CHECK_IDS.has(c.id))
+            .flatMap((c) => c.affectedResources)
+            .filter((r) => r.kind === "product")
+            .map((r) => r.id),
+        ),
+      ]
+    : [];
   const navigation = useNavigation();
   const busy = fetcher.state !== "idle" || navigation.state === "loading";
 
@@ -58,7 +82,9 @@ export default function StorefrontReadiness() {
       <s-button
         slot="primary-action"
         loading={busy}
-        onClick={() => fetcher.submit({}, { method: "post" })}
+        onClick={() =>
+          fetcher.submit({ intent: "recheck" }, { method: "post" })
+        }
       >
         Recheck now
       </s-button>
@@ -114,6 +140,13 @@ export default function StorefrontReadiness() {
                 {checks.map((check) => (
                   <CheckRow key={check.id} check={check} />
                 ))}
+                {group.id === "seo" &&
+                  missingSeoIds.length > 0 &&
+                  (canWrite ? (
+                    <SeoBatchAction productIds={missingSeoIds} />
+                  ) : (
+                    <WriteAccessBanner action="apply suggested SEO" />
+                  ))}
               </s-stack>
             </s-section>
           );

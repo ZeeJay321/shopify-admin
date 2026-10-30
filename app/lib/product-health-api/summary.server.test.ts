@@ -21,6 +21,7 @@ function record(
   return {
     snapshot: perfectProduct({ id: "gid://shopify/Product/42", ...overrides }),
     handle: "hoodie",
+    vendor: "ZJ",
     imageUrl: null,
     imageAlt: null,
     inventoryItemIds: ["9001"],

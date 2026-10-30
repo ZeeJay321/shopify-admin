@@ -45,3 +45,16 @@ export function numericIdFromGid(
   const id = gid.slice(prefix.length);
   return /^\d+$/.test(id) ? id : null;
 }
+
+/**
+ * Validate and normalise an id for a given Shopify type: accepts a numeric
+ * id or a full GID of exactly that type. Throws `invalid_id` otherwise.
+ */
+export function toGid(type: string, value: string | null | undefined): string {
+  const trimmed = (value ?? "").trim();
+  if (/^\d+$/.test(trimmed) && trimmed !== "0") {
+    return `gid://shopify/${type}/${trimmed}`;
+  }
+  if (numericIdFromGid(trimmed, type)) return trimmed;
+  throw new ShopifyApiError("invalid_id", `${type} id`, `not a ${type} id`);
+}

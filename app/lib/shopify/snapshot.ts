@@ -12,6 +12,7 @@ export type ProductNode = ProductHealthListQuery["products"]["nodes"][number];
 export type ProductRecord = {
   snapshot: ProductSnapshot;
   handle: string;
+  vendor: string;
   imageUrl: string | null;
   imageAlt: string | null;
   /** Numeric inventory item ids of the fetched variants (for cache tags). */
@@ -46,6 +47,7 @@ export function toProductRecord(node: ProductNode): ProductRecord {
       publishedToOnlineStore: toStringOrNull(node.onlineStoreUrl) !== null,
     },
     handle: node.handle,
+    vendor: node.vendor,
     imageUrl: toStringOrNull(image?.url),
     imageAlt: image?.altText ?? null,
     inventoryItemIds: node.variants.nodes

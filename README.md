@@ -7,8 +7,9 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 - **Inventory Risk:** flags variants that are about to sell out, with a per-location breakdown.
 - **Order Operations:** triages recent orders that need attention, without touching customer data.
 - **Storefront Readiness:** an extensible, weighted checklist of whether the catalog is ready for a storefront.
+- **Confirmed write actions:** fix SEO, publish or unpublish a product, and adjust stock. Every write is previewed, explicitly confirmed and checked against stale data.
 
-**Shopify is the source of truth.** Everything is read live through the Admin GraphQL API. The app stores **no products, inventory, collections or orders**, only Shopify sessions and processed webhook ids. It is **read-only**: no mutations and no `write_*` scopes.
+**Shopify is the source of truth.** Everything is read live through the Admin GraphQL API. The app stores **no products, inventory, collections or orders**, only Shopify sessions and processed webhook ids. Writes go straight to Shopify through three narrow mutations; nothing is copied locally. There are no deletes and no price changes.
 
 > This app is separate from the headless storefront (`zj-headless-storefront`), which it can optionally notify when products change.
 
@@ -22,6 +23,7 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 - [Models](#models): Product Health, Inventory Risk, Order Operations, Storefront Readiness
 - [Cache](#cache)
 - [Admin UI extensions](#admin-ui-extensions)
+- [Write actions](#write-actions) and [Threat model](#threat-model-for-writes)
 - [Security notes](#security-notes)
 - [Local development](#local-development) and [Testing on a development store](#testing-on-a-development-store)
 - [Limitations](#limitations)
@@ -42,6 +44,9 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 | 4 | **Order Operations:** Today, Unfulfilled, High value and Needs attention cards; reason and severity badges; filters; no customer data | `/app/orders` |
 | 4 | **Storefront Readiness:** 12 weighted checks in an extensible registry, with grouped results and affected products | `/app/readiness` |
 | 4 | **Order webhooks** in the same idempotent registry, and an "Orders needing attention" card on Store Health | |
+| 5 | **Fix SEO** and **Publish / Move to draft** with a preview and confirmation | `/app/products/:id` |
+| 5 | **Adjust stock** per variant and location, with Shopify compare-and-set | `/app/inventory` |
+| 5 | **Apply suggested SEO** to up to 10 products missing SEO | `/app/readiness` |
 
 ## Architecture
 
@@ -86,19 +91,24 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 | `read_inventory` | `InventoryItem.inventoryLevels` and `InventoryLevel.quantities` (available per location); the `inventory_levels/update` webhook | 3 |
 | `read_locations` | The `locations` query (location filter and names) | 3 |
 | `read_orders` | `orders` and `ordersCount` (**last 60 days only**); the `orders/create` and `orders/updated` webhooks | 4 |
+| `write_products` | `productUpdate`, only for the confirmed **SEO** and **status** actions | 5 |
+| `write_inventory` | `inventoryAdjustQuantities`, only for the confirmed **Adjust stock** action | 5 |
 
 **Scopes this app doesn't request:**
 - `read_all_orders`: older orders would need Shopify's approval.
 - Customer scopes.
 - `read_publications`: the Online Store check uses `onlineStoreUrl`. Checking a Headless channel would need `read_publications` and is a possible follow-up.
-- Any `write_*` scope.
+- Any other `write_*` scope (no orders, customers, discounts, publications or price writes).
 
 **Protected customer data:** Shopify treats orders as protected customer data even when no personal fields are read (Level 1). The app must have **protected customer data access** configured in the Partner Dashboard: Apps → ZJ Commerce Operations → **API access requests** → Protected customer data access → Request access → select the order data use (no name, email, phone or address fields).
 - Apps installed only on development stores don't need Shopify's review, but the access must still be configured.
 - Without it, order queries are denied. Order Operations shows a permission banner, Store Health shows a hint, and everything else keeps working.
 - `shopify app dev` / `deploy` may refuse to register the `orders/*` subscriptions. In that case, configure access, or temporarily remove that `[[webhooks.subscriptions]]` block; order data then refreshes on the 10-minute TTL.
 
-**Existing installs must re-approve.** Adding scopes doesn't grant them. After `npm run dev` or `shopify app deploy` pushes `shopify.app.toml`, Shopify asks the merchant to approve the new access the next time the app is opened in Admin. If no prompt appears, reinstall the app on the dev store. The `app/scopes_update` webhook then updates the stored session scope. Until the merchant approves, Inventory Risk and Order Operations show permission banners, and earlier features keep working.
+**Existing installs must re-approve.** Adding scopes doesn't grant them. After `npm run dev` or `shopify app deploy` pushes `shopify.app.toml`, Shopify asks the merchant to approve the new access the next time the app is opened in Admin. If no prompt appears, reinstall the app on the dev store. The `app/scopes_update` webhook then updates the stored session scope. Until the merchant approves:
+- Inventory Risk and Order Operations show permission banners.
+- The write actions are **disabled** and show an "Approve new permissions" banner. The server also refuses them with `403 permission_needed` before calling Shopify.
+- All read-only pages keep working.
 
 ## Webhooks
 
@@ -132,6 +142,9 @@ All declared in `shopify.app.toml` (API 2026-07). The six catalog and order topi
 | `ordersCount(query, limit: null)` | Today (shop timezone), unfulfilled | `orders.server.ts` |
 | `shop { ianaTimezone }` | Start of "today" | `orders.server.ts` |
 | `collections` | Title, handle, `productsCount` | `collections.server.ts` |
+| `productUpdate(product:)` | `seo { title description }` or `status` (DRAFT/ACTIVE); `userErrors { field message }` | `mutations/product.server.ts` |
+| `inventoryAdjustQuantities @idempotent(key:)` | `name: "available"`, `reason: "correction"`, `referenceDocumentUri`, `changes { inventoryItemId locationId delta changeFromQuantity }`; `userErrors { code field message }` | `mutations/inventory.server.ts` |
+| `inventoryItem(id).inventoryLevel(locationId)` | Current available quantity after a conflict | `inventory.server.ts` |
 | Webhooks | The topics above, via `authenticate.webhook` | `webhooks/` |
 | Admin UI extensions 2026-07 | `admin.product-details.block.render`, `admin.product-details.action.render` | `extensions/` |
 
@@ -246,6 +259,63 @@ The extensions bundle no scoring logic, only response types and a view-model map
 | Shopify error | 502 |
 | Expired session | 401 |
 
+## Write actions
+
+There are three actions, plus a capped batch. All of them are POST-only React Router actions on the page that shows the data.
+
+| Action | Where | Mutation (2026-07) | Scope |
+|---|---|---|---|
+| **Fix SEO** (title ≤ 70, description ≤ 160) | Product Health detail | `productUpdate(product: { id, seo })` | `write_products` |
+| **Publish / Move to draft** (DRAFT ↔ ACTIVE only) | Product Health detail | `productUpdate(product: { id, status })`. `productChangeStatus` is deprecated in 2026-07. | `write_products` |
+| **Adjust stock** (available, per location) | Inventory Risk | `inventoryAdjustQuantities` with `@idempotent(key:)` | `write_inventory` |
+| **Apply suggested SEO** (up to `SEO_BATCH_MAX` = 10 products) | Storefront Readiness → SEO | `productUpdate`, one product at a time | `write_products` |
+
+### Safeguards
+
+1. **Preview.** The dialog shows before/after values, computed by the same pure planner ([`app/lib/actions/`](app/lib/actions/)) that the server uses to re-validate.
+2. **Explicit confirmation.**
+   - A second step uses explicit wording, for example *"This will update the SEO title and description for "Organic Hoodie"."*
+   - Only the Confirm button sends `confirm=yes`. Without it, the server returns `400 confirmation_required` and doesn't call Shopify.
+   - **Extra acknowledgement** (`acknowledge=yes`) is required to publish a product failing critical checks (no image, a zero or missing price, or no description), to set stock to 0, or to change stock by more than 100 units.
+3. **Validation, before any Shopify call:**
+   - Ids must be GIDs of the right type: Product, InventoryItem, Location.
+   - **SEO:** text is trimmed and whitespace collapsed; values can't be empty, too long or placeholder text ("Untitled", "lorem ipsum", "TODO"…), and a no-op is rejected.
+   - **Status:** only DRAFT ↔ ACTIVE; archived products are left alone.
+   - **Stock:** integers only, the result must be ≥ 0, and a single change is limited to `MAX_INVENTORY_ADJUSTMENT` (**1000**) units.
+4. **Stale-data protection:**
+   - **Stock:** Shopify **compare-and-set**. `changeFromQuantity` is the quantity the merchant saw, and it has been mandatory since 2026-04. If stock changed meanwhile, Shopify returns `CHANGE_FROM_QUANTITY_STALE`. The app then responds `409`, re-reads the current quantity and shows *"Stock changed in Shopify while this dialog was open…"*, so nothing is overwritten.
+   - **SEO and status:** `productUpdate` has no compare-and-set, so the form sends the values the merchant saw, and the server re-reads the product just before mutating. A mismatch returns `409` with the current values. This is a check-then-act guard, and a small race window remains.
+5. **Idempotency.**
+   - **Key:** stock changes carry a UUID (the `@idempotent` key, required since 2026-04), generated once when the confirm step opens. A retried or double-clicked confirmation runs once.
+   - **Audit trail:** each adjustment uses `reason: "correction"` and `referenceDocumentUri: gid://zj-commerce-ops/InventoryAdjustment/<key>`, which shows in Shopify's inventory history.
+6. **userErrors.** Every mutation inspects `userErrors` and maps them to typed errors. `productUpdate` errors are mapped by field path, because they have no codes. Inventory errors are mapped by code:
+
+   | Inventory code | Maps to |
+   |---|---|
+   | `CHANGE_FROM_QUANTITY_STALE` | conflict |
+   | `INVALID_QUANTITY_*` | field error |
+   | `ITEM_NOT_STOCKED_AT_LOCATION`, invalid location or item | not found |
+   | `NON_MUTABLE_INVENTORY_ITEM`, idempotency failures | failed |
+
+   `ACCESS_DENIED` maps to "permission needed". Merchants see fixed, friendly copy; Shopify's raw text goes to server logs only.
+7. **No deletes, no price changes, no bulk operations** beyond the 10-product SEO batch. The batch isn't all-or-nothing: each product reports its own success or failure. Products that changed since the preview are skipped as conflicts, and throttling stops the remaining items with a "try again" note.
+8. **Cache and webhooks.** A successful write immediately invalidates the same tags the matching webhook would, so the merchant sees fresh data at once:
+   - SEO and status: `product:{id}`, `products`, `inventory`, `readiness`.
+   - Stock: `inventory`, `inventory-item:{id}`, `readiness`, `product:{id}`.
+
+   A failed write invalidates nothing. The `products/update` or `inventory_levels/update` webhook that Shopify then sends goes through the idempotent pipeline and invalidates the same tags again. That's harmless and processed exactly once.
+
+### Threat model for writes
+
+| Threat | Mitigation |
+|---|---|
+| **CSRF** | Actions authenticate with the App Bridge session token in the `Authorization` header (`authenticate.admin` on every request), not cookies, so a cross-site form post can't carry credentials. Non-POST methods get `405`. |
+| **Shop spoofing** | The shop comes only from the verified session. Request fields like `shop=` are ignored (tested), and the Admin API token is bound to that shop, so a resource from another store can't be reached. |
+| **Replay or double submit** | The confirmation step is required, and stock changes carry an idempotency key, so Shopify executes them once. SEO and status writes are idempotent by value. |
+| **Lost updates** | Compare-and-set for stock, and a stale-value check for SEO and status. |
+| **Accidental or harmful edits** | Narrow scopes, no deletes or prices, per-action limits, extra acknowledgements, and preview before confirm. |
+| **Data leakage** | Logs record only `intent`, `shop`, resource id and outcome. No request bodies, tokens or raw Shopify errors reach logs or the UI. |
+
 ## Security notes
 
 - **No customer PII.** Order queries select no customer, email, phone or address fields. Order webhook payloads aren't read. Nothing customer-related is stored or logged. A unit test asserts the orders query contains no such fields.
@@ -254,7 +324,7 @@ The extensions bundle no scoring logic, only response types and a view-model map
 - **Verified webhooks.** HMAC is checked by `authenticate.webhook`. Duplicates are ignored and failures are retried.
 - **Merchant-safe errors.** Raw Shopify errors go to server logs only. Pages show fixed, friendly copy.
 - **No secrets in logs.** The storefront hook logs only status codes, never the secret or the signature.
-- **Read-only.** No mutations and no write scopes.
+- **Narrow, confirmed writes.** There are only three mutations, each POST-only and gated by scope, validated server-side, confirmed and checked for staleness. There are no deletes or price writes. See [Threat model](#threat-model-for-writes).
 
 ## Local development
 
@@ -310,7 +380,16 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
    - Open `/app/readiness`.
    - Unpublish a product from the Online Store, empty a collection, or take a product out of every collection.
    - Click **Recheck now**.
-6. **Webhooks** (with the local port from `npm run dev`):
+6. **Write actions** (after approving `write_products` and `write_inventory`):
+   - **Fix SEO:** open a seeded product without SEO → **Fix SEO**. The fields are prefilled with suggestions. Edit them, **Review changes**, then **Confirm**. A success banner appears, and the score updates immediately.
+   - **Publish with warnings:** open the draft "Untitled" product (no image, price 0) → **Publish**. The warnings and the acknowledgement checkbox appear.
+   - **Adjust stock:** in Inventory Risk → **Adjust stock** → choose a location → enter a new quantity → review → confirm.
+   - **Stale-quantity conflict:** open **Adjust stock**, then *in another tab* change that variant's stock in Shopify Admin, then confirm. You get the "Stock changed" message and the reloaded current value.
+   - **Stale SEO conflict:** the same idea; edit the product's SEO in Admin while the dialog is open.
+   - **Batch:** Storefront Readiness → SEO → **Apply suggested SEO** → review the per-product preview → confirm. Check the per-product results.
+   - **Missing scope:** before approving, the actions are disabled and show the "Approve new permissions" banner.
+   - **Webhooks after a write:** the dev terminal logs the resulting `products/update` or `inventory_levels/update` once, and `ProcessedWebhook` gets one row per webhook id.
+7. **Webhooks** (with the local port from `npm run dev`):
    ```sh
    shopify app webhook trigger --topic orders/create --api-version 2026-07 \
      --delivery-method http --address http://localhost:<port>/webhooks/app/catalog
@@ -340,6 +419,8 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
 - **Publishing:** readiness checks the Online Store channel, not a Headless channel, because that would need `read_publications`.
 - **Collection-only changes** refresh via the TTL or **Recheck now**, not a webhook.
 - **The high-value threshold** is one number in shop currency; multi-currency stores may want per-currency thresholds.
+- **SEO and status staleness** is check-then-act, because `productUpdate` has no compare-and-set; a change in the milliseconds between the re-read and the write can still be overwritten. Stock changes use Shopify's atomic compare-and-set.
+- **Write-scope detection** reads the session's stored scope, which the `app/scopes_update` webhook keeps current. If they ever disagree, Shopify's `ACCESS_DENIED` still produces the same "permission needed" message.
 
 ## Planned phases
 
@@ -347,7 +428,7 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
 2. ~~Admin UI extensions (product block and action)~~ ✅ done
 3. ~~Idempotent webhooks, cache invalidation, Inventory Risk~~ ✅ done
 4. ~~Order Operations, Storefront Readiness, order webhooks~~ ✅ done
-5. **Confirmed write actions:** for example "Fix SEO title", "Publish to Online Store", "Adjust stock". Each would show a preview and need confirmation, add minimal `write_*` scopes per action, and use mutations through `assertNoUserErrors`.
+5. ~~Confirmed write actions: Fix SEO, Publish / Move to draft, Adjust stock, and the capped SEO batch~~ ✅ done
 
 ## Interview talking points
 
@@ -358,6 +439,9 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
 - **Extensible readiness.** A check is one object with a weight and an `evaluate` function, and the score is derived, never hardcoded.
 - **Extension architecture.** The Admin UI extensions call a session-token-authenticated app route instead of the Admin API directly. Scoring logic and the Admin token stay on the server, CORS and re-auth come from `authenticate.admin`, and the extension bundles stay small (about 9 KB).
 - **Privacy by design.** Orders are triaged from name, totals, statuses and line items only. The order queries select no customer fields, and a test enforces that.
+- **Safe mutations.** Every write is a pipeline: POST only → verified session → scope check → explicit confirmation → server-side re-validation (the same pure planner that drew the preview) → stale-data check → mutation → userErrors mapped to typed errors → cache invalidated only on success. Each step is a separate, unit-tested function, and there are tests showing an unconfirmed or invalid request never reaches Shopify.
+- **Optimistic concurrency.** Merchants edit what they saw, not what's there now. For stock, Shopify's `changeFromQuantity` makes the write conditional, and a mismatch becomes a 409 with fresh data instead of a silent overwrite. Where Shopify offers no compare-and-set (SEO, status), the app does check-then-act with the expected values, and the README is explicit about the remaining race window.
+- **Idempotency on both sides.** Incoming webhooks are deduplicated by a `(shop, webhookId)` unique insert. Outgoing stock writes carry an `@idempotent` key frozen at confirmation. Retries are therefore safe in both directions.
 
 ## Screenshots
 

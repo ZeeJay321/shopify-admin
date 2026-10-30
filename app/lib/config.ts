@@ -93,3 +93,17 @@ export const READINESS_AFFECTED_LIMIT = 20;
 
 /** Check score at or above this is "warn" rather than "fail" (1 = pass). */
 export const READINESS_WARN_AT = 0.75;
+
+// --- Write actions (phase 5) -------------------------------------------------
+
+/** Max |delta| for one confirmed stock adjustment. Default 1000 units. */
+export const MAX_INVENTORY_ADJUSTMENT = 1_000;
+
+/** Adjustments larger than this (or to 0) need an extra acknowledgement. */
+export const LARGE_ADJUSTMENT_WARN = 100;
+
+/** Max products in one "Apply suggested SEO" batch. */
+export const SEO_BATCH_MAX = 10;
+
+/** Prefix for this app's inventory reference document URIs. */
+export const APP_REFERENCE_GID_PREFIX = "gid://zj-commerce-ops";

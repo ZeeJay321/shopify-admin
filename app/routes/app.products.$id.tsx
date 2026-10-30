@@ -1,4 +1,8 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type {
+  ActionFunctionArgs,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -6,6 +10,14 @@ import { GROUPS, scoreProduct } from "../lib/product-health";
 import { toLoaderError } from "../lib/shopify/errors";
 import { toNumericId, toProductGid } from "../lib/shopify/gid";
 import { getProduct } from "../lib/shopify/products.server";
+import { writeAccess } from "../lib/shopify/scopes";
+import { suggestSeo } from "../lib/actions";
+import {
+  appCache,
+  productActionHandlers,
+  runWriteAction,
+} from "../lib/services/actions/index.server";
+import { ProductActions } from "../components/actions/product-actions";
 import {
   CheckStatusIcon,
   ErrorBanner,
@@ -13,9 +25,13 @@ import {
   ScoreBadge,
 } from "../components/health-ui";
 
-/** Product Health detail. Read-only: issues show manual fix steps. */
+/**
+ * Product Health detail: issues with manual fix steps, plus confirmed write
+ * actions (Fix SEO, Publish / Move to draft) when write_products is granted.
+ */
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const canWrite = writeAccess(session.scope).products;
 
   try {
     const gid = toProductGid(params.id);
@@ -30,17 +46,43 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         imageUrl: record.imageUrl,
         imageAlt: record.imageAlt,
       },
+      seo: {
+        title: record.snapshot.seoTitle ?? "",
+        description: record.snapshot.seoDescription ?? "",
+      },
+      suggestion: suggestSeo({
+        title: record.snapshot.title,
+        vendor: record.vendor,
+        description: record.snapshot.description,
+      }),
       health,
+      canWrite,
     };
   } catch (error) {
-    return { error: toLoaderError(error), product: null, health: null };
+    return {
+      error: toLoaderError(error),
+      product: null,
+      seo: null,
+      suggestion: null,
+      health: null,
+      canWrite,
+    };
   }
 };
 
-export default function ProductHealthDetail() {
-  const { error, product, health } = useLoaderData<typeof loader>();
+/** POST only: update_seo | set_status (see lib/services/actions). */
+export const action = ({ request }: ActionFunctionArgs) =>
+  runWriteAction(request, {
+    authenticate: authenticate.admin,
+    cache: appCache,
+    handlers: productActionHandlers,
+  });
 
-  if (error || !product || !health) {
+export default function ProductHealthDetail() {
+  const { error, product, seo, suggestion, health, canWrite } =
+    useLoaderData<typeof loader>();
+
+  if (error || !product || !health || !seo || !suggestion) {
     return (
       <s-page heading="Product Health">
         <s-link slot="breadcrumb-actions" href="/app/products">
@@ -85,6 +127,15 @@ export default function ProductHealthDetail() {
           </s-stack>
         </s-stack>
       </s-section>
+
+      <ProductActions
+        product={product}
+        seo={seo}
+        suggestion={suggestion}
+        checks={health.checks}
+        canWrite={canWrite}
+        seoNeedsWork={health.issues.some((i) => i.group === "seo")}
+      />
 
       {health.issues.length > 0 && (
         <s-section heading="How to fix">

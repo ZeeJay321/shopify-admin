@@ -10,6 +10,7 @@ function variant(
 ): VariantInventory {
   return {
     variantId: "1",
+    inventoryItemId: "501",
     variantTitle: "Default Title",
     productId: "10",
     productTitle: "Tee",

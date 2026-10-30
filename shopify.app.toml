@@ -7,13 +7,16 @@ embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-# Read-only. read_products: catalog, collections + scoring; read_inventory:
+# read_products: catalog, collections + scoring; read_inventory:
 # inventory levels and inventory_levels/update; read_locations: location names;
 # read_orders: recent orders (last 60 days) and orders/* webhooks. Orders are
 # protected customer data (level 1): configure access in the Partner Dashboard.
-# Never add read_all_orders or customer scopes without a reviewed need.
+# write_products: confirmed SEO and status changes (productUpdate).
+# write_inventory: confirmed stock adjustments (inventoryAdjustQuantities).
+# Never add read_all_orders, customer scopes or other write scopes without a
+# reviewed need.
 # See README "Scopes" before adding anything here.
-scopes = "read_products,read_inventory,read_locations,read_orders"
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders"
 
 [webhooks]
 api_version = "2026-07"
