@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useFetcher } from "react-router";
 import type { WriteActionResult } from "../../lib/actions";
 import {
@@ -14,79 +14,35 @@ import {
   MAX_SEO_TITLE_LENGTH,
 } from "../../lib/product-health";
 import type { HealthCheck } from "../../lib/product-health/types";
+import { enumLabel } from "../../lib/presentation";
 import {
   BeforeAfter,
+  CharCounter,
   ResultBanner,
   Warnings,
-  WriteAccessBanner,
   fieldError,
 } from "./shared";
+
+export const SEO_MODAL_ID = "fix-seo-modal";
+export const STATUS_MODAL_ID = "status-modal";
 
 type Product = { id: string; title: string; status: string };
 type Seo = { title: string; description: string };
 
-const SEO_MODAL = "fix-seo-modal";
-const STATUS_MODAL = "status-modal";
-
-export function ProductActions({
-  product,
-  seo,
-  suggestion,
-  checks,
-  canWrite,
-  seoNeedsWork,
-}: {
-  product: Product;
-  seo: Seo;
-  suggestion: Seo;
-  checks: HealthCheck[];
-  canWrite: boolean;
-  seoNeedsWork: boolean;
-}) {
-  const next = isEditableStatus(product.status)
-    ? STATUS_TRANSITIONS[product.status]
-    : null;
-
-  return (
-    <s-section heading="Actions">
-      <s-stack gap="base">
-        {!canWrite && <WriteAccessBanner action="fix SEO or change status" />}
-        <s-stack direction="inline" gap="base">
-          <s-button
-            variant={seoNeedsWork ? "primary" : "secondary"}
-            disabled={!canWrite}
-            commandFor={SEO_MODAL}
-            command="--show"
-          >
-            Fix SEO
-          </s-button>
-          {next && (
-            <s-button
-              disabled={!canWrite}
-              commandFor={STATUS_MODAL}
-              command="--show"
-            >
-              {next === "ACTIVE" ? "Publish (set active)" : "Move to draft"}
-            </s-button>
-          )}
-        </s-stack>
-        <s-text color="subdued">
-          Changes are previewed and confirmed before anything is saved to
-          Shopify.
-        </s-text>
-      </s-stack>
-
-      {canWrite && (
-        <SeoModal product={product} seo={seo} suggestion={suggestion} />
-      )}
-      {canWrite && next && (
-        <StatusModal product={product} next={next} checks={checks} />
-      )}
-    </s-section>
-  );
+/** The status a product can move to from here, or null (e.g. archived). */
+export function nextStatus(status: string): "ACTIVE" | "DRAFT" | null {
+  return isEditableStatus(status) ? STATUS_TRANSITIONS[status] : null;
 }
 
-function SeoModal({
+export function statusActionLabel(next: "ACTIVE" | "DRAFT"): string {
+  return next === "ACTIVE" ? "Publish" : "Move to draft";
+}
+
+/**
+ * Fix SEO: step 1 edit (live counters, suggestion prefill), step 2 review
+ * (Before / After) and confirm. Resets every time it opens.
+ */
+export function SeoModal({
   product,
   seo,
   suggestion,
@@ -95,21 +51,31 @@ function SeoModal({
   seo: Seo;
   suggestion: Seo;
 }) {
-  const fetcher = useFetcher<WriteActionResult>();
+  const [session, setSession] = useState(0);
+  const fetcher = useFetcher<WriteActionResult>({
+    key: `seo-${product.id}-${session}`,
+  });
   const [step, setStep] = useState<"edit" | "confirm">("edit");
   const [title, setTitle] = useState(seo.title || suggestion.title);
   const [description, setDescription] = useState(
     seo.description || suggestion.description,
   );
+  const [touched, setTouched] = useState({ title: false, description: false });
+
   const result = fetcher.data;
   const submitting = fetcher.state !== "idle";
+  const done = result?.ok === true;
   const plan = planSeoUpdate({ current: seo, next: { title, description } });
+  const showEdit =
+    !done && (step === "edit" || (result !== undefined && !result.ok));
 
-  // After a conflict or validation error, go back to editing (the loader has
-  // revalidated, so `seo` now holds Shopify's current values).
-  useEffect(() => {
-    if (result && !result.ok) setStep("edit");
-  }, [result]);
+  const reset = () => {
+    setSession((n) => n + 1);
+    setStep("edit");
+    setTitle(seo.title || suggestion.title);
+    setDescription(seo.description || suggestion.description);
+    setTouched({ title: false, description: false });
+  };
 
   const confirm = () =>
     fetcher.submit(
@@ -125,10 +91,19 @@ function SeoModal({
       { method: "post" },
     );
 
-  const done = result?.ok === true;
+  const rows = [
+    { label: "SEO title", ...plan.summary.title },
+    { label: "SEO description", ...plan.summary.description },
+  ];
+  const formError = fieldError(
+    "form",
+    plan.errors,
+    result,
+    touched.title || touched.description,
+  );
 
   return (
-    <s-modal id={SEO_MODAL} heading={`Fix SEO: ${product.title}`} size="large">
+    <s-modal id={SEO_MODAL_ID} heading="Fix SEO" size="large" onShow={reset}>
       <s-stack gap="base">
         <ResultBanner result={result} />
         {result &&
@@ -136,79 +111,99 @@ function SeoModal({
           result.code === "conflict" &&
           result.current && (
             <s-paragraph>
-              Shopify now has: title &quot;{String(result.current.title ?? "")}
-              &quot;, description &quot;
+              Shopify now has the title &quot;
+              {String(result.current.title ?? "")}&quot; and description &quot;
               {String(result.current.description ?? "")}&quot;. Your edits are
-              kept below; review them and confirm again.
+              kept; review them and confirm again.
             </s-paragraph>
           )}
 
-        {!done && step === "edit" && (
+        {showEdit && (
           <>
-            <s-text-field
-              label="SEO title"
-              value={title}
-              details={`${plan.values.title.length}/${MAX_SEO_TITLE_LENGTH} characters`}
-              error={fieldError("title", plan.errors, result)}
-              onInput={(event) => setTitle(event.currentTarget.value)}
-            />
-            <s-text-area
-              label="SEO description"
-              value={description}
-              rows={3}
-              details={`${plan.values.description.length}/${MAX_SEO_DESCRIPTION_LENGTH} characters`}
-              error={fieldError("description", plan.errors, result)}
-              onInput={(event) => setDescription(event.currentTarget.value)}
-            />
-            <s-stack direction="inline" gap="small">
+            <s-text color="subdued">
+              Step 1 of 2 · Edit the search listing for {product.title}.
+              Suggestions are only a starting point.
+            </s-text>
+            <s-stack gap="small-300">
+              <s-text-field
+                label="SEO title"
+                value={title}
+                error={fieldError("title", plan.errors, result, touched.title)}
+                onInput={(event) => {
+                  setTitle(event.currentTarget.value);
+                  setTouched((t) => ({ ...t, title: true }));
+                }}
+              />
+              <CharCounter
+                length={plan.values.title.length}
+                max={MAX_SEO_TITLE_LENGTH}
+              />
+            </s-stack>
+            <s-stack gap="small-300">
+              <s-text-area
+                label="SEO description"
+                value={description}
+                rows={3}
+                error={fieldError(
+                  "description",
+                  plan.errors,
+                  result,
+                  touched.description,
+                )}
+                onInput={(event) => {
+                  setDescription(event.currentTarget.value);
+                  setTouched((t) => ({ ...t, description: true }));
+                }}
+              />
+              <CharCounter
+                length={plan.values.description.length}
+                max={MAX_SEO_DESCRIPTION_LENGTH}
+              />
+            </s-stack>
+            <s-stack direction="inline">
               <s-button
                 variant="tertiary"
+                icon="wand"
                 onClick={() => {
                   setTitle(suggestion.title);
                   setDescription(suggestion.description);
+                  setTouched({ title: true, description: true });
                 }}
               >
                 Use suggestion
               </s-button>
             </s-stack>
-            {fieldError("form", plan.errors, result) && (
-              <s-text tone="critical">
-                {fieldError("form", plan.errors, result)}
-              </s-text>
-            )}
+            {formError && <s-text tone="critical">{formError}</s-text>}
             <Warnings warnings={plan.warnings} />
-            <BeforeAfter
-              rows={[
-                { label: "SEO title", ...plan.summary.title },
-                { label: "SEO description", ...plan.summary.description },
-              ]}
-            />
           </>
         )}
 
-        {!done && step === "confirm" && (
+        {!done && !showEdit && (
           <>
+            <s-text color="subdued">Step 2 of 2 · Review and confirm</s-text>
             <s-paragraph>{describeSeoChange(product.title)}</s-paragraph>
-            <BeforeAfter
-              rows={[
-                { label: "SEO title", ...plan.summary.title },
-                { label: "SEO description", ...plan.summary.description },
-              ]}
-            />
+            <BeforeAfter rows={rows} />
           </>
         )}
       </s-stack>
 
       {done ? (
-        <s-button slot="primary-action" commandFor={SEO_MODAL} command="--hide">
+        <s-button
+          slot="primary-action"
+          commandFor={SEO_MODAL_ID}
+          command="--hide"
+        >
           Done
         </s-button>
-      ) : step === "edit" ? (
+      ) : showEdit ? (
         <s-button
           slot="primary-action"
           variant="primary"
           disabled={!plan.valid}
-          onClick={() => setStep("confirm")}
+          onClick={() => {
+            setSession((n) => n + 1); // clear any previous error result
+            setStep("confirm");
+          }}
         >
           Review changes
         </s-button>
@@ -219,10 +214,10 @@ function SeoModal({
           loading={submitting}
           onClick={confirm}
         >
-          Confirm
+          Update SEO
         </s-button>
       )}
-      {!done && step === "confirm" ? (
+      {!done && !showEdit && (
         <s-button
           slot="secondary-actions"
           disabled={submitting}
@@ -230,11 +225,11 @@ function SeoModal({
         >
           Back
         </s-button>
-      ) : null}
+      )}
       {!done && (
         <s-button
           slot="secondary-actions"
-          commandFor={SEO_MODAL}
+          commandFor={SEO_MODAL_ID}
           command="--hide"
         >
           Cancel
@@ -244,7 +239,8 @@ function SeoModal({
   );
 }
 
-function StatusModal({
+/** Publish / Move to draft: single review-and-confirm step. */
+export function StatusModal({
   product,
   next,
   checks,
@@ -253,7 +249,10 @@ function StatusModal({
   next: "ACTIVE" | "DRAFT";
   checks: HealthCheck[];
 }) {
-  const fetcher = useFetcher<WriteActionResult>();
+  const [session, setSession] = useState(0);
+  const fetcher = useFetcher<WriteActionResult>({
+    key: `status-${product.id}-${session}`,
+  });
   const [acknowledged, setAcknowledged] = useState(false);
   const result = fetcher.data;
   const submitting = fetcher.state !== "idle";
@@ -261,6 +260,11 @@ function StatusModal({
   const done = result?.ok === true;
   const blocked =
     !plan.valid || (plan.requiresExtraConfirmation && !acknowledged);
+
+  const reset = () => {
+    setSession((n) => n + 1);
+    setAcknowledged(false);
+  };
 
   const confirm = () =>
     fetcher.submit(
@@ -277,8 +281,9 @@ function StatusModal({
 
   return (
     <s-modal
-      id={STATUS_MODAL}
+      id={STATUS_MODAL_ID}
       heading={next === "ACTIVE" ? "Publish product" : "Move product to draft"}
+      onShow={reset}
     >
       <s-stack gap="base">
         <ResultBanner result={result} />
@@ -287,7 +292,15 @@ function StatusModal({
             <s-paragraph>
               {describeStatusChange(product.title, next)}
             </s-paragraph>
-            <BeforeAfter rows={[{ label: "Status", ...plan.summary }]} />
+            <BeforeAfter
+              rows={[
+                {
+                  label: "Status",
+                  before: enumLabel(plan.summary.before),
+                  after: enumLabel(plan.summary.after),
+                },
+              ]}
+            />
             {plan.errors.map((e) => (
               <s-text key={e.message} tone="critical">
                 {e.message}
@@ -305,8 +318,9 @@ function StatusModal({
                     ))}
                   </s-unordered-list>
                 </s-banner>
+                <s-divider />
                 <s-checkbox
-                  label="I understand and want to publish it anyway"
+                  label="I understand these issues and want to publish anyway"
                   checked={acknowledged}
                   onChange={(event) =>
                     setAcknowledged(event.currentTarget.checked)
@@ -321,7 +335,7 @@ function StatusModal({
       {done ? (
         <s-button
           slot="primary-action"
-          commandFor={STATUS_MODAL}
+          commandFor={STATUS_MODAL_ID}
           command="--hide"
         >
           Done
@@ -335,13 +349,13 @@ function StatusModal({
           loading={submitting}
           onClick={confirm}
         >
-          Confirm
+          {next === "ACTIVE" ? "Publish product" : "Move to draft"}
         </s-button>
       )}
       {!done && (
         <s-button
           slot="secondary-actions"
-          commandFor={STATUS_MODAL}
+          commandFor={STATUS_MODAL_ID}
           command="--hide"
         >
           Cancel

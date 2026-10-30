@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HIGH_VALUE_ORDER_THRESHOLD, UNFULFILLED_ALERT_HOURS } from "../config";
 import { aggregateOrders } from "./aggregate";
 import { classifyOrder, severityFor } from "./classify";
-import { daysAgoIso, relativeTime, startOfDayIso } from "./dates";
+import { daysAgoIso, startOfDayIso } from "./dates";
 import type { LowStockLookup, OrderSnapshot } from "./types";
 
 const NOW = new Date("2026-10-30T12:00:00.000Z");
@@ -246,13 +246,7 @@ describe("dates", () => {
     expect(startOfDayIso(NOW, "Not/AZone")).toBe("2026-10-30T00:00:00+00:00");
   });
 
-  it("formats relative times and day offsets", () => {
-    expect(relativeTime(hoursAgo(0), NOW)).toBe("just now");
-    expect(
-      relativeTime(new Date(NOW.getTime() - 5 * 60_000).toISOString(), NOW),
-    ).toBe("5m ago");
-    expect(relativeTime(hoursAgo(3), NOW)).toBe("3h ago");
-    expect(relativeTime(hoursAgo(50), NOW)).toBe("2d ago");
+  it("computes day offsets", () => {
     expect(daysAgoIso(NOW, 7)).toBe("2026-10-23T12:00:00.000Z");
   });
 });

@@ -14,14 +14,30 @@ import {
   LOW_STOCK_THRESHOLD,
 } from "../lib/config";
 import type { RiskLevel, VariantRisk } from "../lib/inventory-risk";
-import { RISK_LABELS, RISK_TONES } from "../lib/inventory-risk";
 import {
   loadInventoryPage,
   loadInventorySummary,
 } from "../lib/services/inventory-risk.server";
 import { toLoaderError } from "../lib/shopify/errors";
 import { getLocations } from "../lib/shopify/inventory.server";
-import { ErrorBanner } from "../components/health-ui";
+import {
+  RISK_LABELS,
+  RISK_TONES,
+  formatNumber,
+  plural,
+} from "../lib/presentation";
+import {
+  CardGrid,
+  DataCapNotice,
+  EmptyState,
+  ErrorState,
+  MetricCard,
+  PermissionBanner,
+  ProportionBars,
+  RiskBadge,
+  TableSkeleton,
+  Toolbar,
+} from "../components/ui";
 import { writeAccess } from "../lib/shopify/scopes";
 import {
   inventoryActionHandlers,
@@ -140,6 +156,7 @@ export default function InventoryRisk() {
   const [, setSearchParams] = useSearchParams();
   const loading = useNavigation().state === "loading";
   const locationName = locations.find((l) => l.id === filters.locationId)?.name;
+  const permissionMissing = error?.kind === "access_denied";
 
   const go = (next: {
     risk?: string | null;
@@ -161,153 +178,185 @@ export default function InventoryRisk() {
   };
 
   return (
-    <s-page heading="Inventory Risk">
+    <s-page heading="Inventory risk">
       <s-link slot="breadcrumb-actions" href="/app">
-        Store Health
+        Store health
       </s-link>
+      <s-button
+        slot="secondary-actions"
+        href="shopify://admin/products/inventory"
+        target="_top"
+      >
+        Open Shopify inventory
+      </s-button>
 
-      {error && <ErrorBanner error={error} />}
-      {!error && !canWrite && <WriteAccessBanner action="adjust stock" />}
-      {error?.kind === "access_denied" && (
-        <s-banner tone="info" heading="New permissions needed">
-          Inventory Risk needs the read inventory and read locations
-          permissions. Open the app from Shopify Admin and approve the updated
-          access request to enable this page.
-        </s-banner>
+      {permissionMissing ? (
+        <PermissionBanner
+          kind="read"
+          feature="inventory risk"
+          scopes={["read inventory", "read locations"]}
+        />
+      ) : (
+        error && <ErrorState error={error} />
+      )}
+      {!error && !canWrite && (
+        <WriteAccessBanner action="adjust stock" scope="write_inventory" />
       )}
 
       {summary && (
-        <s-section heading="Summary">
+        <s-section accessibilityLabel="Inventory summary">
           <s-stack gap="base">
-            <s-grid gridTemplateColumns="repeat(4, 1fr)" gap="base">
+            <CardGrid>
               {RISK_LEVELS.map((level) => (
-                <s-box
+                <MetricCard
                   key={level}
-                  padding="base"
-                  borderWidth="base"
-                  borderRadius="base"
-                >
-                  <s-stack gap="small-200">
-                    <s-badge tone={RISK_TONES[level]}>
-                      {RISK_LABELS[level]}
-                    </s-badge>
-                    <s-heading>{summary.counts[level]}</s-heading>
-                  </s-stack>
-                </s-box>
+                  label={RISK_LABELS[level]}
+                  value={formatNumber(summary.counts[level])}
+                  tone={RISK_TONES[level]}
+                  toneLabel={
+                    level === "untracked" ? "Excluded" : RISK_LABELS[level]
+                  }
+                  href={`/app/inventory?risk=${level}`}
+                  linkLabel="Show these"
+                />
               ))}
-            </s-grid>
-            <s-text color="subdued">
-              Based on {summary.sampleSize} variant
-              {summary.sampleSize === 1 ? "" : "s"}
+            </CardGrid>
+            <ProportionBars
+              total={summary.sampleSize}
+              segments={(["critical", "low", "healthy"] as const).map(
+                (risk) => ({
+                  key: risk,
+                  label: RISK_LABELS[risk],
+                  value: summary.counts[risk],
+                  tone: RISK_TONES[risk],
+                }),
+              )}
+            />
+            <DataCapNotice>
+              Based on {plural(summary.sampleSize, "variant")}
               {summary.capped
-                ? ` (capped at ${INVENTORY_SAMPLE_CAP}, least stock first)`
+                ? ` (capped at ${formatNumber(INVENTORY_SAMPLE_CAP)}, least stock first)`
                 : ""}
-              . Critical: {CRITICAL_STOCK_THRESHOLD} or fewer available
-              (including out of stock). Low: {LOW_STOCK_THRESHOLD} or fewer.
-              Totals add up all locations.
-            </s-text>
+              . Critical is {CRITICAL_STOCK_THRESHOLD} or fewer available, low
+              is {LOW_STOCK_THRESHOLD} or fewer; totals add up all locations.
+            </DataCapNotice>
           </s-stack>
         </s-section>
       )}
 
-      <s-section padding="none">
-        <s-table
-          loading={loading}
-          paginate
-          hasNextPage={pageInfo?.hasNextPage ?? false}
-          hasPreviousPage={pageInfo?.hasPreviousPage ?? false}
-          onNextPage={() =>
-            go({ cursor: pageInfo?.endCursor ?? null, dir: "next" })
-          }
-          onPreviousPage={() =>
-            go({ cursor: pageInfo?.startCursor ?? null, dir: "prev" })
-          }
-        >
-          <s-grid slot="filters" gridTemplateColumns="1fr 1fr" gap="base">
-            <s-select
-              label="Risk"
-              value={filters.risk ?? ""}
-              onChange={(event) =>
-                go({ risk: event.currentTarget.value || null })
-              }
-            >
-              <s-option value="">All risk levels</s-option>
-              {RISK_LEVELS.map((level) => (
-                <s-option key={level} value={level}>
-                  {RISK_LABELS[level]}
-                </s-option>
-              ))}
-            </s-select>
-            <s-select
-              label="Location"
-              value={filters.locationId ?? ""}
-              onChange={(event) =>
-                go({ locationId: event.currentTarget.value || null })
-              }
-            >
-              <s-option value="">All locations</s-option>
-              {locations.map((l) => (
-                <s-option key={l.id} value={l.id}>
-                  {l.name}
-                </s-option>
-              ))}
-            </s-select>
-          </s-grid>
+      {!permissionMissing && (
+        <s-section padding="none" accessibilityLabel="Variants">
+          <s-table
+            loading={loading}
+            paginate
+            hasNextPage={pageInfo?.hasNextPage ?? false}
+            hasPreviousPage={pageInfo?.hasPreviousPage ?? false}
+            onNextPage={() =>
+              go({ cursor: pageInfo?.endCursor ?? null, dir: "next" })
+            }
+            onPreviousPage={() =>
+              go({ cursor: pageInfo?.startCursor ?? null, dir: "prev" })
+            }
+          >
+            <s-stack slot="filters" gap="small-200">
+              <Toolbar>
+                <s-select
+                  label="Risk"
+                  value={filters.risk ?? ""}
+                  onChange={(event) =>
+                    go({ risk: event.currentTarget.value || null })
+                  }
+                >
+                  <s-option value="">All risk levels</s-option>
+                  {RISK_LEVELS.map((level) => (
+                    <s-option key={level} value={level}>
+                      {RISK_LABELS[level]}
+                    </s-option>
+                  ))}
+                </s-select>
+                <s-select
+                  label="Location"
+                  value={filters.locationId ?? ""}
+                  onChange={(event) =>
+                    go({ locationId: event.currentTarget.value || null })
+                  }
+                >
+                  <s-option value="">All locations</s-option>
+                  {locations.map((l) => (
+                    <s-option key={l.id} value={l.id}>
+                      {l.name}
+                    </s-option>
+                  ))}
+                </s-select>
+              </Toolbar>
+              <DataCapNotice>
+                {filters.risk && pageRowCount > 0
+                  ? `${plural(rows.length, "variant")} with this risk on this page (of ${pageRowCount}). `
+                  : ""}
+                Least stock first.
+              </DataCapNotice>
+            </s-stack>
 
-          <s-table-header-row>
-            <s-table-header listSlot="primary">Product</s-table-header>
-            <s-table-header listSlot="secondary">Variant</s-table-header>
-            <s-table-header format="numeric">
-              {locationName
-                ? `Available at ${locationName}`
-                : "Total available"}
-            </s-table-header>
-            <s-table-header>By location</s-table-header>
-            <s-table-header listSlot="inline">Risk</s-table-header>
-            <s-table-header>Actions</s-table-header>
-          </s-table-header-row>
-          <s-table-body>
-            {rows.map((row) => (
-              <InventoryRow
-                key={row.key}
-                row={row}
-                canWrite={canWrite}
-                onAdjust={() =>
-                  setAdjustTarget({
-                    productId: row.productId,
-                    productTitle: row.productTitle,
-                    variantTitle: row.variantTitle,
-                    inventoryItemId: row.inventoryItemId,
-                    locations: row.locations,
-                    defaultLocationId: filters.locationId,
-                  })
-                }
-              />
-            ))}
-          </s-table-body>
-        </s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="primary">Product</s-table-header>
+              <s-table-header format="numeric">
+                {locationName ? `Available at ${locationName}` : "Available"}
+              </s-table-header>
+              <s-table-header listSlot="inline">Risk</s-table-header>
+              <s-table-header>By location</s-table-header>
+              <s-table-header>Actions</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {rows.map((row) => (
+                <InventoryRow
+                  key={row.key}
+                  row={row}
+                  canWrite={canWrite}
+                  onAdjust={() =>
+                    setAdjustTarget({
+                      productId: row.productId,
+                      productTitle: row.productTitle,
+                      variantTitle: row.variantTitle,
+                      inventoryItemId: row.inventoryItemId,
+                      locations: row.locations,
+                      defaultLocationId: filters.locationId,
+                    })
+                  }
+                />
+              ))}
+            </s-table-body>
+          </s-table>
 
-        {!error && rows.length === 0 && (
-          <s-box padding="base">
-            <s-paragraph>
-              {pageRowCount > 0
-                ? "No variants on this page match this risk level. Use Next to check the next page."
-                : filters.locationId
-                  ? "No variants are stocked at this location."
-                  : "No variants found. Add products in Shopify Admin to see inventory risk."}
-            </s-paragraph>
-          </s-box>
-        )}
-      </s-section>
+          {!error && rows.length === 0 && (
+            <s-box padding="base">
+              {loading ? (
+                <TableSkeleton />
+              ) : pageRowCount > 0 ? (
+                <EmptyState
+                  icon="check-circle"
+                  heading="Nothing at this risk level on this page"
+                  body="Use Next to check more variants, or choose another risk level."
+                />
+              ) : filters.locationId ? (
+                <EmptyState
+                  icon="inventory"
+                  heading="No variants at this location"
+                  body="Nothing is stocked here. Choose another location."
+                  action={{ label: "All locations", href: "/app/inventory" }}
+                />
+              ) : (
+                <EmptyState
+                  icon="inventory"
+                  heading="No variants yet"
+                  body="Add products with tracked inventory in Shopify Admin to see stock risk here."
+                />
+              )}
+            </s-box>
+          )}
+        </s-section>
+      )}
 
       {canWrite && <InventoryAdjustModal target={adjustTarget} />}
-
-      {filters.risk && pageRowCount > 0 && (
-        <s-text color="subdued">
-          Showing {rows.length} of {pageRowCount} variants on this page with
-          risk level {RISK_LABELS[filters.risk].toLowerCase()}.
-        </s-text>
-      )}
     </s-page>
   );
 }
@@ -322,48 +371,80 @@ function InventoryRow({
   onAdjust: () => void;
 }) {
   const adjustable = row.risk !== "untracked" && row.locations.length > 0;
-  const breakdown =
-    row.locations.length === 0
-      ? "Not stocked"
-      : row.locations.map((l) => `${l.name}: ${l.available}`).join(" · ");
+  const variantLabel =
+    row.variantTitle === "Default Title" ? null : row.variantTitle;
 
   return (
     <s-table-row>
       <s-table-cell>
-        <s-link href={`/app/products/${row.productId}`}>
-          {row.productTitle}
-        </s-link>
-      </s-table-cell>
-      <s-table-cell>{row.variantTitle}</s-table-cell>
-      <s-table-cell>
-        {row.risk === "untracked" ? "—" : row.available}
-      </s-table-cell>
-      <s-table-cell>
-        <s-text color="subdued">{breakdown}</s-text>
+        <s-stack gap="small-300">
+          <s-link href={`/app/products/${row.productId}`}>
+            {row.productTitle}
+          </s-link>
+          {variantLabel && <s-text color="subdued">{variantLabel}</s-text>}
+        </s-stack>
       </s-table-cell>
       <s-table-cell>
-        <s-badge tone={RISK_TONES[row.risk]}>{RISK_LABELS[row.risk]}</s-badge>
+        <s-text type="strong">
+          {row.risk === "untracked" ? "—" : formatNumber(row.available)}
+        </s-text>
       </s-table-cell>
       <s-table-cell>
-        <s-stack direction="inline" gap="small" alignItems="center">
+        <RiskBadge risk={row.risk} />
+      </s-table-cell>
+      <s-table-cell>
+        <LocationBreakdown locations={row.locations} />
+      </s-table-cell>
+      <s-table-cell>
+        <s-button-group>
           <s-button
-            variant="tertiary"
+            variant="secondary"
             disabled={!canWrite || !adjustable}
             commandFor={ADJUST_MODAL}
             command="--show"
             onClick={onAdjust}
+            accessibilityLabel={`Adjust stock for ${row.productTitle}`}
           >
-            {adjustable ? "Adjust stock" : "Not tracked"}
+            Adjust
           </s-button>
-          <s-link
+          <s-button
+            variant="tertiary"
             href={`shopify://admin/products/${row.productId}/variants/${row.variantId}`}
             target="_top"
+            accessibilityLabel={`Open ${row.productTitle} in Shopify Admin`}
           >
-            Open variant
-          </s-link>
-        </s-stack>
+            Admin
+          </s-button>
+        </s-button-group>
       </s-table-cell>
     </s-table-row>
+  );
+}
+
+/** One location inline; several collapse into an expandable list. */
+function LocationBreakdown({ locations }: { locations: Row["locations"] }) {
+  if (locations.length === 0)
+    return <s-text color="subdued">Not stocked</s-text>;
+  if (locations.length === 1) {
+    const [only] = locations;
+    return (
+      <s-text color="subdued">{`${only.name}: ${formatNumber(only.available)}`}</s-text>
+    );
+  }
+  return (
+    <details>
+      <summary>
+        <s-text color="subdued">{`${locations.length} locations`}</s-text>
+      </summary>
+      <s-stack gap="small-300">
+        {locations.map((l) => (
+          <s-text
+            key={l.id}
+            color="subdued"
+          >{`${l.name}: ${formatNumber(l.available)}`}</s-text>
+        ))}
+      </s-stack>
+    </details>
   );
 }
 

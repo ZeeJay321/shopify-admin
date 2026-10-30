@@ -1,40 +1,56 @@
 import type { FieldError, WriteActionResult } from "../../lib/actions";
+import { LiveRegion, PermissionBanner } from "../ui";
 
 /** Shown instead of failing when a write scope isn't approved yet. */
-export function WriteAccessBanner({ action }: { action: string }) {
-  return (
-    <s-banner tone="warning" heading="Approve new permissions to make changes">
-      To {action}, the app needs permission to update your store. Open the app
-      from Shopify Admin and approve the updated access request. Everything else
-      on this page keeps working without it.
-    </s-banner>
-  );
+export function WriteAccessBanner({
+  action,
+  scope = "write_products",
+}: {
+  action: string;
+  scope?: "write_products" | "write_inventory";
+}) {
+  const label =
+    scope === "write_inventory" ? "update inventory" : "update products";
+  return <PermissionBanner kind="write" feature={action} scopes={[label]} />;
 }
 
+/** Success/error feedback, announced to screen readers; never auto-hidden. */
 export function ResultBanner({
   result,
 }: {
   result: WriteActionResult | undefined;
 }) {
   if (!result) return null;
-  if (result.ok) return <s-banner tone="success">{result.message}</s-banner>;
+  if (result.ok) {
+    return (
+      <LiveRegion>
+        <s-banner tone="success">{result.message}</s-banner>
+      </LiveRegion>
+    );
+  }
   return (
-    <s-banner tone={result.code === "conflict" ? "warning" : "critical"}>
-      {result.message}
-    </s-banner>
+    <LiveRegion urgent>
+      <s-banner tone={result.code === "conflict" ? "warning" : "critical"}>
+        {result.message}
+      </s-banner>
+    </LiveRegion>
   );
 }
 
-/** First error for a field, preferring the server's answer. */
+/**
+ * First error for a field, preferring the server's answer. Client-side
+ * errors only show once the field was touched (no errors before input).
+ */
 export function fieldError(
   field: string,
   clientErrors: readonly FieldError[],
   result: WriteActionResult | undefined,
+  touched = true,
 ): string | undefined {
   const server = result && !result.ok ? result.fieldErrors : undefined;
   return (
     server?.find((e) => e.field === field)?.message ??
-    clientErrors.find((e) => e.field === field)?.message
+    (touched ? clientErrors.find((e) => e.field === field)?.message : undefined)
   );
 }
 
@@ -44,33 +60,66 @@ export type BeforeAfterRow = {
   after: string | number;
 };
 
+/** Two-column Before / After comparison, stacked on narrow widths. */
 export function BeforeAfter({ rows }: { rows: BeforeAfterRow[] }) {
   return (
-    <s-table>
-      <s-table-header-row>
-        <s-table-header listSlot="primary">Field</s-table-header>
-        <s-table-header>Before</s-table-header>
-        <s-table-header>After</s-table-header>
-      </s-table-header-row>
-      <s-table-body>
-        {rows.map((row) => (
-          <s-table-row key={row.label}>
-            <s-table-cell>{row.label}</s-table-cell>
-            <s-table-cell>
-              <s-text color="subdued">{display(row.before)}</s-text>
-            </s-table-cell>
-            <s-table-cell>
-              <s-text type="strong">{display(row.after)}</s-text>
-            </s-table-cell>
-          </s-table-row>
-        ))}
-      </s-table-body>
-    </s-table>
+    <s-stack gap="base">
+      {rows.map((row) => {
+        const changed = String(row.before) !== String(row.after);
+        return (
+          <s-stack key={row.label} gap="small-200">
+            <s-stack direction="inline" gap="small-200" alignItems="center">
+              <s-text type="strong">{row.label}</s-text>
+              {changed ? (
+                <s-badge tone="info">Changes</s-badge>
+              ) : (
+                <s-badge>No change</s-badge>
+              )}
+            </s-stack>
+            <s-query-container>
+              <s-grid
+                gap="small-200"
+                gridTemplateColumns="@container (inline-size > 480px) minmax(0, 1fr) minmax(0, 1fr), minmax(0, 1fr)"
+              >
+                <s-box
+                  padding="small"
+                  borderWidth="base"
+                  borderRadius="base"
+                  background="subdued"
+                >
+                  <s-stack gap="small-300">
+                    <s-text color="subdued">Before</s-text>
+                    <s-text>{display(row.before)}</s-text>
+                  </s-stack>
+                </s-box>
+                <s-box padding="small" borderWidth="base" borderRadius="base">
+                  <s-stack gap="small-300">
+                    <s-text color="subdued">After</s-text>
+                    <s-text type="strong">{display(row.after)}</s-text>
+                  </s-stack>
+                </s-box>
+              </s-grid>
+            </s-query-container>
+          </s-stack>
+        );
+      })}
+    </s-stack>
   );
 }
 
 function display(value: string | number): string {
   return value === "" ? "(empty)" : String(value);
+}
+
+/** "45 / 70 characters", turning caution near and critical over the limit. */
+export function CharCounter({ length, max }: { length: number; max: number }) {
+  const tone =
+    length > max ? "critical" : length >= max * 0.9 ? "caution" : "neutral";
+  const text =
+    length > max
+      ? `${length} / ${max} characters, ${length - max} over the limit`
+      : `${length} / ${max} characters`;
+  return <s-text tone={tone}>{text}</s-text>;
 }
 
 export function Warnings({ warnings }: { warnings: readonly string[] }) {

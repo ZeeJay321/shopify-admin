@@ -1,9 +1,16 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useRouteError } from "react-router";
+import {
+  Outlet,
+  useLoaderData,
+  useLocation,
+  useNavigation,
+  useRouteError,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
+import { PageSkeleton } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -14,17 +21,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const location = useLocation();
+  // Skeleton only when moving to another page; same-page filter changes keep
+  // their content and show inline loading instead (no layout jump).
+  const changingPage =
+    navigation.state === "loading" &&
+    navigation.location.pathname !== location.pathname;
 
   return (
     <AppProvider apiKey={apiKey}>
       <s-app-nav>
-        <s-link href="/app">Store Health</s-link>
-        <s-link href="/app/products">Product Health</s-link>
-        <s-link href="/app/inventory">Inventory Risk</s-link>
-        <s-link href="/app/orders">Order Operations</s-link>
-        <s-link href="/app/readiness">Storefront Readiness</s-link>
+        {/* rel="home": the app name opens Store Health; not a separate item */}
+        <a href="/app" rel="home">
+          Store health
+        </a>
+        <s-link href="/app/products">Products</s-link>
+        <s-link href="/app/inventory">Inventory</s-link>
+        <s-link href="/app/orders">Orders</s-link>
+        <s-link href="/app/readiness">Readiness</s-link>
       </s-app-nav>
-      <Outlet />
+      {changingPage ? <PageSkeleton /> : <Outlet />}
     </AppProvider>
   );
 }

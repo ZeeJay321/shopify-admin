@@ -8,6 +8,7 @@
 
 import type { ScoreTone } from "../product-health";
 import type { CheckStatus } from "../product-health/types";
+import { checkStatusTone } from "../presentation/status-tones";
 import { productNumericIdOrNull } from "../shopify/gid";
 import type {
   HealthErrorCode,
@@ -40,15 +41,9 @@ export function reportHref(reportPath: string): string {
   return `app:${reportPath.replace(/^\/+/, "")}`;
 }
 
+/** Badge tone for a group status; shared mapping (lib/presentation). */
 export function groupTone(status: CheckStatus): BadgeTone {
-  switch (status) {
-    case "pass":
-      return "success";
-    case "warn":
-      return "warning";
-    case "fail":
-      return "critical";
-  }
+  return checkStatusTone(status) as BadgeTone;
 }
 
 export function badgeTone(tone: ScoreTone): BadgeTone {

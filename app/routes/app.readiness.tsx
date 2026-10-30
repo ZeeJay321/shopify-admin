@@ -7,8 +7,6 @@ import { useFetcher, useLoaderData, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { appCache } from "../lib/cache/index.server";
-import { HEALTH_SAMPLE_CAP } from "../lib/config";
-import { scoreTone } from "../lib/product-health";
 import { loadReadiness } from "../lib/services/readiness.server";
 import {
   readinessActionHandlers,
@@ -21,7 +19,21 @@ import { WriteAccessBanner } from "../components/actions/shared";
 import { toLoaderError } from "../lib/shopify/errors";
 import type { CheckResult } from "../lib/storefront-readiness";
 import { READINESS_GROUPS } from "../lib/storefront-readiness";
-import { CheckStatusIcon, ErrorBanner } from "../components/health-ui";
+import {
+  checkSeverityTone,
+  enumLabel,
+  formatNumber,
+  plural,
+  readinessVerdict,
+} from "../lib/presentation";
+import {
+  CheckRow,
+  DataCapNotice,
+  EmptyState,
+  ErrorState,
+  LiveRegion,
+  ScoreIndicator,
+} from "../components/ui";
 
 /** Storefront Readiness: weighted checks over products and collections. */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -51,15 +63,12 @@ export const action = ({ request }: ActionFunctionArgs) =>
 
 const SEO_CHECK_IDS = new Set(["seo_titles", "seo_descriptions"]);
 
-const SEVERITY_TONE = {
-  critical: "critical",
-  warning: "warning",
-  info: "info",
-} as const;
-
 export default function StorefrontReadiness() {
   const { error, report, canWrite } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<WriteActionResult>();
+  const navigation = useNavigation();
+  const busy = fetcher.state !== "idle" || navigation.state === "loading";
+
   const missingSeoIds = report
     ? [
         ...new Set(
@@ -71,16 +80,19 @@ export default function StorefrontReadiness() {
         ),
       ]
     : [];
-  const navigation = useNavigation();
-  const busy = fetcher.state !== "idle" || navigation.state === "loading";
+  const openChecks = report
+    ? report.checks.filter((c) => c.status === "warn" || c.status === "fail")
+        .length
+    : 0;
+  const verdict = report ? readinessVerdict(report.score, openChecks) : null;
 
   return (
-    <s-page heading="Storefront Readiness">
+    <s-page heading="Storefront readiness">
       <s-link slot="breadcrumb-actions" href="/app">
-        Store Health
+        Store health
       </s-link>
       <s-button
-        slot="primary-action"
+        slot="secondary-actions"
         loading={busy}
         onClick={() =>
           fetcher.submit({ intent: "recheck" }, { method: "post" })
@@ -89,64 +101,95 @@ export default function StorefrontReadiness() {
         Recheck now
       </s-button>
 
-      {error && <ErrorBanner error={error} />}
+      {error && <ErrorState error={error} />}
+      {fetcher.data?.ok && fetcher.state === "idle" && (
+        <LiveRegion>
+          <s-text accessibilityVisibility="exclusive">
+            {fetcher.data.message}
+          </s-text>
+        </LiveRegion>
+      )}
 
-      {report && (
-        <s-section heading="Overall">
-          <s-stack gap="small-200">
-            {report.score === null ? (
-              <s-paragraph>
-                Nothing to check yet. Add and activate products to see
-                storefront readiness.
-              </s-paragraph>
-            ) : (
+      {report && verdict && (
+        <s-section>
+          {report.score === null ? (
+            <EmptyState
+              icon="product"
+              heading="Nothing to check yet"
+              body="Add and activate products to see how ready your storefront is."
+              action={{
+                label: "Add product",
+                href: "shopify://admin/products/new",
+              }}
+            />
+          ) : (
+            <s-stack gap="base">
+              <ScoreIndicator score={report.score} label="Readiness score" />
               <s-stack direction="inline" gap="small-200" alignItems="center">
-                <s-badge tone={scoreTone(report.score)}>
-                  {report.score} / 100
+                <s-badge tone={verdict.tone}>
+                  {openChecks === 0 ? "Ready" : `${openChecks} to fix`}
                 </s-badge>
-                <s-text color="subdued">
-                  Weighted across{" "}
-                  {
-                    report.checks.filter((c) => c.status !== "not_applicable")
-                      .length
-                  }{" "}
-                  checks.
-                </s-text>
+                <s-text type="strong">{verdict.text}</s-text>
               </s-stack>
-            )}
-            <s-text color="subdued">
-              Based on {report.productCount} product
-              {report.productCount === 1 ? "" : "s"} ({report.liveProductCount}{" "}
-              active)
-              {report.productsCapped ? `, capped at ${HEALTH_SAMPLE_CAP}` : ""}
-              {report.collectionCount === null
-                ? "; collections unavailable"
-                : ` and ${report.collectionCount} collection${report.collectionCount === 1 ? "" : "s"}${report.collectionsCapped ? " (capped)" : ""}`}
-              . Publishing is checked against the Online Store channel.
-              Collection-only changes refresh within 10 minutes, or use Recheck
-              now.
-            </s-text>
-          </s-stack>
+              <DataCapNotice>
+                Based on {plural(report.productCount, "product")} (
+                {formatNumber(report.liveProductCount)} active)
+                {report.productsCapped ? ", capped" : ""}
+                {report.collectionCount === null
+                  ? "; collections couldn't be loaded"
+                  : ` and ${plural(report.collectionCount, "collection")}${report.collectionsCapped ? " (capped)" : ""}`}
+                . Publishing is checked against the Online Store channel.
+                Collection-only changes refresh within 10 minutes, or use
+                Recheck now.
+              </DataCapNotice>
+            </s-stack>
+          )}
         </s-section>
       )}
 
       {report &&
+        report.score !== null &&
         READINESS_GROUPS.map((group) => {
           const checks = report.checks.filter((c) => c.group === group.id);
           if (checks.length === 0) return null;
+          const open = checks.filter(
+            (c) => c.status === "warn" || c.status === "fail",
+          ).length;
           return (
             <s-section key={group.id} heading={group.label}>
               <s-stack gap="base">
+                <s-text color="subdued">
+                  {open === 0
+                    ? `All ${checks.length} checks pass`
+                    : `${open} of ${checks.length} checks need work`}
+                </s-text>
                 {checks.map((check) => (
-                  <CheckRow key={check.id} check={check} />
+                  <ReadinessCheck key={check.id} check={check} />
                 ))}
-                {group.id === "seo" &&
-                  missingSeoIds.length > 0 &&
-                  (canWrite ? (
-                    <SeoBatchAction productIds={missingSeoIds} />
-                  ) : (
-                    <WriteAccessBanner action="apply suggested SEO" />
-                  ))}
+                {group.id === "seo" && missingSeoIds.length > 0 && (
+                  <s-box
+                    padding="base"
+                    borderWidth="base"
+                    borderRadius="base"
+                    background="subdued"
+                  >
+                    {canWrite ? (
+                      <s-stack gap="small-200">
+                        <s-heading>Fix missing SEO in bulk</s-heading>
+                        <s-text color="subdued">
+                          Fill in suggested SEO titles and descriptions for up
+                          to 10 products. Only missing fields are filled; you
+                          review every change first.
+                        </s-text>
+                        <s-stack direction="inline">
+                          <SeoBatchAction productIds={missingSeoIds} />
+                        </s-stack>
+                      </s-stack>
+                    ) : (
+                      <WriteAccessBanner action="apply suggested SEO" />
+                    )}
+                  </s-box>
+                )}
               </s-stack>
             </s-section>
           );
@@ -155,49 +198,53 @@ export default function StorefrontReadiness() {
   );
 }
 
-function CheckRow({ check }: { check: CheckResult }) {
+function ReadinessCheck({ check }: { check: CheckResult }) {
   return (
-    <s-stack gap="small-200">
-      <s-stack direction="inline" gap="small" alignItems="center">
-        {check.status === "not_applicable" ? (
-          <s-badge tone="neutral">N/A</s-badge>
-        ) : (
-          <CheckStatusIcon status={check.status} />
-        )}
-        <s-text type="strong">{check.name}</s-text>
-        <s-badge tone={SEVERITY_TONE[check.severity]}>{check.severity}</s-badge>
-        {check.affectedCount > 0 && (
-          <s-text color="subdued">{check.affectedCount} affected</s-text>
-        )}
-      </s-stack>
-      <s-text color="subdued">{check.description}</s-text>
+    <CheckRow
+      status={check.status}
+      label={check.name}
+      message={check.description}
+      meta={
+        <>
+          <s-badge tone={checkSeverityTone(check.severity, check.status)}>
+            {enumLabel(check.severity)}
+          </s-badge>
+          {check.affectedCount > 0 && (
+            <s-text color="subdued">{`${formatNumber(check.affectedCount)} affected`}</s-text>
+          )}
+        </>
+      }
+    >
       {check.affectedResources.length > 0 && (
         <details>
           <summary>
-            Show affected
-            {check.affectedCount > check.affectedResources.length
-              ? ` (first ${check.affectedResources.length} of ${check.affectedCount})`
-              : ""}
+            <s-text>
+              {check.affectedCount > check.affectedResources.length
+                ? `Show first ${check.affectedResources.length} of ${formatNumber(check.affectedCount)}`
+                : `Show ${plural(check.affectedCount, "affected item")}`}
+            </s-text>
           </summary>
-          <s-unordered-list>
-            {check.affectedResources.map((r) => (
-              <s-list-item key={`${r.kind}-${r.id}`}>
-                {r.kind === "product" ? (
-                  <s-link href={`/app/products/${r.id}`}>{r.title}</s-link>
-                ) : (
-                  <s-link
-                    href={`shopify://admin/collections/${r.id}`}
-                    target="_top"
-                  >
-                    {r.title}
-                  </s-link>
-                )}
-              </s-list-item>
-            ))}
-          </s-unordered-list>
+          <s-box paddingBlockStart="small-200">
+            <s-unordered-list>
+              {check.affectedResources.map((r) => (
+                <s-list-item key={`${r.kind}-${r.id}`}>
+                  {r.kind === "product" ? (
+                    <s-link href={`/app/products/${r.id}`}>{r.title}</s-link>
+                  ) : (
+                    <s-link
+                      href={`shopify://admin/collections/${r.id}`}
+                      target="_top"
+                    >
+                      {r.title}
+                    </s-link>
+                  )}
+                </s-list-item>
+              ))}
+            </s-unordered-list>
+          </s-box>
         </details>
       )}
-    </s-stack>
+    </CheckRow>
   );
 }
 

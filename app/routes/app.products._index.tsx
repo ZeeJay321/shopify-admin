@@ -2,6 +2,7 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useNavigation, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import { PRODUCTS_PAGE_SIZE } from "../lib/config";
 import { scoreProduct } from "../lib/product-health";
 import { toLoaderError } from "../lib/shopify/errors";
 import { toNumericId } from "../lib/shopify/gid";
@@ -10,11 +11,17 @@ import {
   PRODUCT_STATUSES,
   isProductStatusFilter,
 } from "../lib/shopify/product-status";
+import { enumLabel, plural } from "../lib/presentation";
 import {
-  ErrorBanner,
-  ProductStatusBadge,
-  ScoreBadge,
-} from "../components/health-ui";
+  CountBadge,
+  DataCapNotice,
+  EmptyState,
+  ErrorState,
+  ScoreIndicator,
+  StatusBadge,
+  TableSkeleton,
+  Toolbar,
+} from "../components/ui";
 
 /**
  * Product Health list. Query params:
@@ -40,6 +47,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return {
         id: toNumericId(record.snapshot.id),
         title: record.snapshot.title || "(untitled)",
+        vendor: record.vendor,
+        handle: record.handle,
         status: record.snapshot.status,
         imageUrl: record.imageUrl,
         imageAlt: record.imageAlt,
@@ -66,6 +75,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 };
 
+type Row = Awaited<ReturnType<typeof loader>>["rows"][number];
+
 export default function ProductHealthList() {
   const { error, rows, pageRowCount, pageInfo, filters } =
     useLoaderData<typeof loader>();
@@ -91,15 +102,20 @@ export default function ProductHealthList() {
     setSearchParams(params);
   };
 
+  const filtered = Boolean(filters.status || filters.onlyIssues);
+
   return (
-    <s-page heading="Product Health">
+    <s-page heading="Product health">
       <s-link slot="breadcrumb-actions" href="/app">
-        Store Health
+        Store health
       </s-link>
+      <s-button slot="secondary-actions" href="/app/readiness">
+        Storefront readiness
+      </s-button>
 
-      {error && <ErrorBanner error={error} />}
+      {error && <ErrorState error={error} />}
 
-      <s-section padding="none">
+      <s-section padding="none" accessibilityLabel="Products">
         <s-table
           loading={loading}
           paginate
@@ -112,88 +128,123 @@ export default function ProductHealthList() {
             go({ cursor: pageInfo?.startCursor ?? null, dir: "prev" })
           }
         >
-          <s-grid
-            slot="filters"
-            gridTemplateColumns="1fr auto"
-            gap="base"
-            alignItems="center"
-          >
-            <s-select
-              label="Status"
-              value={filters.status ?? ""}
-              onChange={(event) =>
-                go({ status: event.currentTarget.value || null })
-              }
-            >
-              <s-option value="">All statuses</s-option>
-              {PRODUCT_STATUSES.map((s) => (
-                <s-option key={s} value={s}>
-                  {s.charAt(0) + s.slice(1).toLowerCase()}
-                </s-option>
-              ))}
-            </s-select>
-            <s-checkbox
-              label="Only products with issues"
-              checked={filters.onlyIssues}
-              onChange={(event) =>
-                go({ onlyIssues: event.currentTarget.checked })
-              }
-            />
-          </s-grid>
+          <s-stack slot="filters" gap="small-200">
+            <Toolbar>
+              <s-select
+                label="Status"
+                value={filters.status ?? ""}
+                onChange={(event) =>
+                  go({ status: event.currentTarget.value || null })
+                }
+              >
+                <s-option value="">All statuses</s-option>
+                {PRODUCT_STATUSES.map((s) => (
+                  <s-option key={s} value={s}>
+                    {enumLabel(s)}
+                  </s-option>
+                ))}
+              </s-select>
+              <s-switch
+                label="Only products with issues"
+                checked={filters.onlyIssues}
+                onChange={(event) =>
+                  go({ onlyIssues: event.currentTarget.checked })
+                }
+              />
+            </Toolbar>
+            <DataCapNotice>
+              {filters.onlyIssues
+                ? `${plural(rows.length, "product")} with issues on this page (of ${pageRowCount}). `
+                : `${plural(rows.length, "product")} on this page. `}
+              Sorted by title, {PRODUCTS_PAGE_SIZE} per page.
+            </DataCapNotice>
+          </s-stack>
 
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             <s-table-header listSlot="inline">Status</s-table-header>
             <s-table-header listSlot="secondary">Health score</s-table-header>
-            <s-table-header format="numeric">Issues</s-table-header>
+            <s-table-header>Issues</s-table-header>
+            <s-table-header>
+              <s-text accessibilityVisibility="exclusive">Open</s-text>
+            </s-table-header>
           </s-table-header-row>
           <s-table-body>
             {rows.map((row) => (
-              <s-table-row key={row.id}>
-                <s-table-cell>
-                  <s-stack direction="inline" gap="small" alignItems="center">
-                    <s-thumbnail
-                      src={row.imageUrl ?? undefined}
-                      alt={row.imageAlt ?? row.title}
-                      size="small"
-                    />
-                    <s-link href={`/app/products/${row.id}`}>
-                      {row.title}
-                    </s-link>
-                  </s-stack>
-                </s-table-cell>
-                <s-table-cell>
-                  <ProductStatusBadge status={row.status} />
-                </s-table-cell>
-                <s-table-cell>
-                  <ScoreBadge score={row.score} />
-                </s-table-cell>
-                <s-table-cell>{row.issueCount}</s-table-cell>
-              </s-table-row>
+              <ProductRow key={row.id} row={row} />
             ))}
           </s-table-body>
         </s-table>
 
         {!error && rows.length === 0 && (
           <s-box padding="base">
-            <s-paragraph>
-              {pageRowCount > 0
-                ? "No products on this page have issues. Use Next to check the next page."
-                : filters.status
-                  ? "No products match this status."
-                  : "No products yet. Add products in Shopify Admin to see their health."}
-            </s-paragraph>
+            {loading ? (
+              <TableSkeleton />
+            ) : pageRowCount > 0 ? (
+              <EmptyState
+                icon="check-circle"
+                heading="No issues on this page"
+                body="Every product on this page passes its checks. Use Next to check the next page."
+              />
+            ) : filtered ? (
+              <EmptyState
+                heading="No products match these filters"
+                body="Try a different status or turn off the issues filter."
+                action={{ label: "Clear filters", href: "/app/products" }}
+              />
+            ) : (
+              <EmptyState
+                icon="product"
+                heading="No products yet"
+                body="Add products in Shopify Admin and they'll be scored here automatically."
+                action={{
+                  label: "Add product",
+                  href: "shopify://admin/products/new",
+                }}
+              />
+            )}
           </s-box>
         )}
       </s-section>
-
-      {filters.onlyIssues && pageRowCount > 0 && (
-        <s-text color="subdued">
-          Showing {rows.length} of {pageRowCount} products on this page that
-          have issues.
-        </s-text>
-      )}
     </s-page>
+  );
+}
+
+function ProductRow({ row }: { row: Row }) {
+  const subtitle = [row.vendor, row.handle].filter(Boolean).join(" · ");
+  return (
+    <s-table-row>
+      <s-table-cell>
+        <s-stack direction="inline" gap="small" alignItems="center">
+          <s-thumbnail
+            src={row.imageUrl ?? undefined}
+            alt={row.imageAlt ?? row.title}
+            size="small"
+          />
+          <s-stack gap="small-300">
+            <s-link href={`/app/products/${row.id}`}>{row.title}</s-link>
+            {subtitle && <s-text color="subdued">{subtitle}</s-text>}
+          </s-stack>
+        </s-stack>
+      </s-table-cell>
+      <s-table-cell>
+        <StatusBadge status={row.status} />
+      </s-table-cell>
+      <s-table-cell>
+        <ScoreIndicator score={row.score} size="compact" />
+      </s-table-cell>
+      <s-table-cell>
+        <CountBadge count={row.issueCount} noun="issue" />
+      </s-table-cell>
+      <s-table-cell>
+        <s-button
+          variant="tertiary"
+          icon="chevron-right"
+          href={`/app/products/${row.id}`}
+          accessibilityLabel={`Open health report for ${row.title}`}
+        />
+      </s-table-cell>
+    </s-table-row>
   );
 }
 

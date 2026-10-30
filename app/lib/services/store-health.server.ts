@@ -8,10 +8,13 @@ import { keyTags, storeCountsKey, storeHealthSampleKey } from "../cache/keys";
 import { HEALTH_SAMPLE_CAP } from "../config";
 import type { IssueCount } from "../product-health";
 import {
+  GROUPS,
   aggregateStoreHealth,
   scoreProduct,
+  summarizeGroups,
   topIssues,
 } from "../product-health";
+import type { CheckGroup } from "../product-health/types";
 import type { AdminGraphqlClient } from "../shopify/client";
 import type { StoreCounts } from "../shopify/products.server";
 import { getProductSample, getStoreCounts } from "../shopify/products.server";
@@ -22,6 +25,13 @@ export type StoreHealthSample = {
   averageScore: number | null;
   productsWithIssues: number;
   topIssues: IssueCount[];
+  /** Average points earned per group across the sample (for the breakdown). */
+  groupAverages: Array<{
+    id: CheckGroup;
+    label: string;
+    earned: number;
+    weight: number;
+  }>;
 };
 
 export async function loadStoreHealth(
@@ -50,14 +60,28 @@ async function loadSample(
   client: AdminGraphqlClient,
 ): Promise<StoreHealthSample> {
   const sample = await getProductSample(client, HEALTH_SAMPLE_CAP);
-  const health = aggregateStoreHealth(
-    sample.products.map((p) => scoreProduct(p.snapshot)),
-  );
+  const results = sample.products.map((p) => scoreProduct(p.snapshot));
+  const health = aggregateStoreHealth(results);
+  const groupTotals = new Map<CheckGroup, number>();
+  for (const result of results) {
+    for (const g of summarizeGroups(result)) {
+      groupTotals.set(g.id, (groupTotals.get(g.id) ?? 0) + g.earned);
+    }
+  }
+  const groupAverages = GROUPS.map((g) => ({
+    id: g.id,
+    label: g.label,
+    weight: g.weight,
+    earned: results.length
+      ? Math.round(((groupTotals.get(g.id) ?? 0) / results.length) * 10) / 10
+      : 0,
+  }));
   return {
     size: health.sampleSize,
     capped: sample.capped,
     averageScore: health.averageScore,
     productsWithIssues: health.productsWithIssues,
     topIssues: topIssues(health, 5),
+    groupAverages,
   };
 }

@@ -36,27 +36,34 @@ export function InventoryAdjustModal({
 }: {
   target: AdjustTarget | null;
 }) {
-  const fetcher = useFetcher<WriteActionResult>();
+  const [session, setSession] = useState(0);
+  const fetcher = useFetcher<WriteActionResult>({ key: `adjust-${session}` });
   const [step, setStep] = useState<"edit" | "confirm">("edit");
   const [locationId, setLocationId] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [touched, setTouched] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [actionKey, setActionKey] = useState("");
   /** Quantity Shopify reported after a conflict, overriding the page data. */
   const [reloaded, setReloaded] = useState<Record<string, number>>({});
 
-  // Reset whenever a different variant is opened.
-  useEffect(() => {
-    if (!target) return;
-    const first =
-      target.locations.find((l) => l.id === target.defaultLocationId) ??
-      target.locations[0];
-    setLocationId(first?.id ?? "");
-    setQuantity(first ? String(first.available) : "");
+  const reset = () => {
+    setSession((n) => n + 1);
     setStep("edit");
+    setTouched(false);
     setAcknowledged(false);
     setReloaded({});
-  }, [target]);
+    if (target) {
+      const first =
+        target.locations.find((l) => l.id === target.defaultLocationId) ??
+        target.locations[0];
+      setLocationId(first?.id ?? "");
+      setQuantity(first ? String(first.available) : "");
+    }
+  };
+
+  // A different row was chosen: start fresh for it.
+  useEffect(reset, [target]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = fetcher.data;
   useEffect(() => {
@@ -65,10 +72,10 @@ export function InventoryAdjustModal({
     const current = result.current?.quantity;
     if (result.code === "conflict" && typeof current === "number") {
       setReloaded((prev) => ({ ...prev, [locationId]: current }));
+      setQuantity(String(current));
+      setTouched(false);
     }
-    // locationId is the one that was submitted
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result]);
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!target) {
     return <s-modal id={ADJUST_MODAL} heading="Adjust stock" />;
@@ -83,9 +90,10 @@ export function InventoryAdjustModal({
   const label = `${target.productTitle} – ${target.variantTitle}`;
   const submitting = fetcher.state !== "idle";
   const done = result?.ok === true;
+  const multiLocation = target.locations.length > 1;
 
   const review = () => {
-    setActionKey(newActionKey()); // frozen for this confirmation
+    setActionKey(newActionKey()); // frozen for this confirmation (idempotency)
     setStep("confirm");
   };
 
@@ -106,7 +114,7 @@ export function InventoryAdjustModal({
     );
 
   return (
-    <s-modal id={ADJUST_MODAL} heading={`Adjust stock: ${label}`}>
+    <s-modal id={ADJUST_MODAL} heading="Adjust stock" onShow={reset}>
       <s-stack gap="base">
         <ResultBanner result={result} />
         {result && !result.ok && result.code === "conflict" && (
@@ -119,32 +127,70 @@ export function InventoryAdjustModal({
 
         {!done && step === "edit" && (
           <>
-            <s-select
-              label="Location"
-              value={locationId}
-              onChange={(event) => {
-                const id = event.currentTarget.value;
-                setLocationId(id);
-                const loc = target.locations.find((l) => l.id === id);
-                setQuantity(String(reloaded[id] ?? loc?.available ?? ""));
-              }}
-            >
-              {target.locations.map((l) => (
-                <s-option key={l.id} value={l.id}>
-                  {l.name}
-                </s-option>
-              ))}
-            </s-select>
-            <s-text>
-              Current available at {location?.name}:{" "}
-              <s-text type="strong">{expected}</s-text>
-            </s-text>
-            <s-text-field
+            <s-text color="subdued">Step 1 of 2 · {label}</s-text>
+            {multiLocation ? (
+              <s-select
+                label="Location"
+                value={locationId}
+                onChange={(event) => {
+                  const id = event.currentTarget.value;
+                  setLocationId(id);
+                  const loc = target.locations.find((l) => l.id === id);
+                  setQuantity(String(reloaded[id] ?? loc?.available ?? ""));
+                  setTouched(false);
+                }}
+              >
+                {target.locations.map((l) => (
+                  <s-option key={l.id} value={l.id}>
+                    {`${l.name} (${reloaded[l.id] ?? l.available} available)`}
+                  </s-option>
+                ))}
+              </s-select>
+            ) : (
+              <s-text>Location: {location?.name}</s-text>
+            )}
+            <s-number-field
               label="New available quantity"
               value={quantity}
-              error={fieldError("quantity", plan.errors, result)}
-              onInput={(event) => setQuantity(event.currentTarget.value)}
+              min={0}
+              details={`Currently ${expected} available`}
+              error={fieldError("quantity", plan.errors, result, touched)}
+              onInput={(event) => {
+                setQuantity(event.currentTarget.value);
+                setTouched(true);
+              }}
             />
+            {touched && plan.valid && (
+              <s-text color="subdued">
+                {`Change: ${plan.summary.delta > 0 ? "+" : ""}${plan.summary.delta} units`}
+              </s-text>
+            )}
+            <Warnings warnings={plan.warnings} />
+            {plan.requiresExtraConfirmation && (
+              <>
+                <s-divider />
+                <s-checkbox
+                  label="I've checked this change is correct"
+                  checked={acknowledged}
+                  onChange={(event) =>
+                    setAcknowledged(event.currentTarget.checked)
+                  }
+                />
+              </>
+            )}
+          </>
+        )}
+
+        {!done && step === "confirm" && (
+          <>
+            <s-text color="subdued">Step 2 of 2 · Review and confirm</s-text>
+            <s-paragraph>
+              {describeInventoryChange(
+                label,
+                location?.name ?? "this location",
+                plan.summary,
+              )}
+            </s-paragraph>
             <BeforeAfter
               rows={[
                 {
@@ -154,27 +200,7 @@ export function InventoryAdjustModal({
                 },
               ]}
             />
-            <Warnings warnings={plan.warnings} />
-            {plan.requiresExtraConfirmation && (
-              <s-checkbox
-                label="I've checked this change is correct"
-                checked={acknowledged}
-                onChange={(event) =>
-                  setAcknowledged(event.currentTarget.checked)
-                }
-              />
-            )}
           </>
-        )}
-
-        {!done && step === "confirm" && (
-          <s-paragraph>
-            {describeInventoryChange(
-              label,
-              location?.name ?? "this location",
-              plan.summary,
-            )}
-          </s-paragraph>
         )}
       </s-stack>
 
@@ -204,7 +230,7 @@ export function InventoryAdjustModal({
           loading={submitting}
           onClick={confirm}
         >
-          Confirm
+          Update stock
         </s-button>
       )}
       {!done && step === "confirm" && (
