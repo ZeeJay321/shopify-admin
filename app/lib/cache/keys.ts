@@ -1,0 +1,63 @@
+/**
+ * Typed cache keys and their invalidation tags, in one place so the
+ * webhook-to-invalidation mapping is easy to audit.
+ *
+ * | Key                    | Tags                                     |
+ * |------------------------|------------------------------------------|
+ * | store-counts           | products                                 |
+ * | store-health-sample    | products, inventory                      |
+ * | inventory-summary      | inventory, products                      |
+ * | product-health:{id}    | product:{id}, inventory-item:{itemId}... |
+ * | orders-summary         | orders, inventory                        |
+ * | storefront-readiness   | readiness                                |
+ */
+
+import type { HealthSummaryResponse } from "../product-health-api/contract";
+import type { StoreHealthSample } from "../services/store-health.server";
+import type { InventoryRiskSummary } from "../services/inventory-risk.server";
+import type { OrdersSummary } from "../services/orders.server";
+import type { ReadinessReport } from "../storefront-readiness/types";
+import type { StoreCounts } from "../shopify/products.server";
+import { cacheKey, cacheTags } from "./types";
+
+export const storeCountsKey = cacheKey<StoreCounts>("store-counts");
+export const storeHealthSampleKey = cacheKey<StoreHealthSample>(
+  "store-health-sample",
+);
+export const inventorySummaryKey =
+  cacheKey<InventoryRiskSummary>("inventory-summary");
+export type CachedProductHealth = {
+  summary: HealthSummaryResponse;
+  /** Kept so inventory_levels/update can find this entry by item id. */
+  inventoryItemIds: string[];
+};
+export const ordersSummaryKey = cacheKey<OrdersSummary>("orders-summary");
+export const readinessKey = cacheKey<ReadinessReport>("storefront-readiness");
+export const productHealthKey = (productId: string) =>
+  cacheKey<CachedProductHealth>(`product-health:${productId}`);
+
+export const keyTags = {
+  storeCounts: (shop: string) => [cacheTags.products(shop)],
+  storeHealthSample: (shop: string) => [
+    cacheTags.products(shop),
+    cacheTags.inventory(shop),
+  ],
+  inventorySummary: (shop: string) => [
+    cacheTags.inventory(shop),
+    cacheTags.products(shop),
+  ],
+  // Low-stock reasons come from inventory risk, so inventory changes count too.
+  ordersSummary: (shop: string) => [
+    cacheTags.orders(shop),
+    cacheTags.inventory(shop),
+  ],
+  readiness: (shop: string) => [cacheTags.readiness(shop)],
+  productHealth: (
+    shop: string,
+    productId: string,
+    inventoryItemIds: readonly string[],
+  ) => [
+    cacheTags.product(shop, productId),
+    ...inventoryItemIds.map((id) => cacheTags.inventoryItem(shop, id)),
+  ],
+};

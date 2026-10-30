@@ -1,0 +1,13 @@
+api_version = "2026-07"
+
+[[extensions]]
+# Change the merchant-facing name of the extension in locales/en.default.json
+name = "t:name"
+handle = "zj-product-health-block"
+type = "ui_extension"
+uid = "267f10e3-34e1-c965-c6cd-53824726ef67eadf8d86"
+
+# Only 1 target can be specified for each Admin block extension
+[[extensions.targeting]]
+module = "./src/BlockExtension.tsx"
+target = "admin.product-details.block.render"

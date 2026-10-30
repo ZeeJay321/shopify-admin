@@ -1,0 +1,15 @@
+{
+  "name": "Run Product Health Check",
+  "running": "Running health check…",
+  "openReport": "Open report",
+  "close": "Close",
+  "topIssues": "Top issues",
+  "score": "{{score}} / 100",
+  "issueCount": "{{count}} issue(s) to fix",
+  "healthy": "Looks healthy",
+  "unavailable": "Health check isn't available for this product.",
+  "sessionExpired": "Your session expired. Reload the page to check product health.",
+  "errorTitle": "Couldn't check product health",
+  "errorMessage": "Something went wrong. Try again in a moment.",
+  "retry": "Retry"
+}

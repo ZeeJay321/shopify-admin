@@ -1,0 +1,11 @@
+Handle,Title,Body (HTML),Vendor,Published,Option1 Name,Option1 Value,Variant Inventory Tracker,Variant Inventory Qty,Variant Inventory Policy,Variant Fulfillment Service,Variant Price,Variant Requires Shipping,SEO Title,SEO Description,Status
+zj-health-perfect,ZJ Health Perfect Tee,<p>A midweight cotton tee with a relaxed fit and reinforced collar. Pre-shrunk and garment dyed.</p>,ZJ,TRUE,Size,S,shopify,40,deny,manual,25.00,TRUE,ZJ Health Perfect Tee | ZJ,A midweight cotton tee with a relaxed fit and reinforced collar. Pre-shrunk and garment dyed for a soft feel.,active
+zj-health-perfect,,,,,,M,shopify,40,deny,manual,25.00,TRUE,,,
+zj-health-perfect,,,,,,L,shopify,40,deny,manual,25.00,TRUE,,,
+zj-health-no-description,ZJ Health No Description,,ZJ,TRUE,Title,Default Title,shopify,30,deny,manual,19.00,TRUE,No Description Tee | ZJ,This product intentionally has no body description so the Content check fails in ZJ Commerce Ops.,active
+zj-health-no-seo,ZJ Health No SEO,<p>This product has a full description but no search engine listing title or meta description set.</p>,ZJ,TRUE,Title,Default Title,shopify,30,deny,manual,22.00,TRUE,,,active
+zj-health-zero-price,ZJ Health Zero Price,<p>This product has a full description but its only variant is priced at zero to trigger the price check.</p>,ZJ,TRUE,Title,Default Title,shopify,30,deny,manual,0.00,TRUE,Zero Price Tee | ZJ,This product intentionally has a zero price so the Variants check fails in ZJ Commerce Ops.,active
+zj-health-stock,ZJ Health Stock Problems,<p>One size is sold out and another is nearly gone. Used to trigger out-of-stock and low-stock checks.</p>,ZJ,TRUE,Size,S,shopify,0,deny,manual,30.00,TRUE,Stock Problems Tee | ZJ,One size is sold out and another is nearly gone. Used to trigger the inventory checks in ZJ Commerce Ops.,active
+zj-health-stock,,,,,,M,shopify,2,deny,manual,30.00,TRUE,,,
+zj-health-stock,,,,,,L,shopify,25,deny,manual,30.00,TRUE,,,
+zj-health-draft,Untitled,,ZJ,FALSE,Title,Default Title,shopify,0,deny,manual,0.00,TRUE,,,draft

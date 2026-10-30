@@ -1,0 +1,38 @@
+# Existing build / dependency artifacts
+.cache
+build
+node_modules
+
+# Secrets and local env (keep template if present)
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases and sidecars
+prisma/dev.sqlite
+prisma/dev.sqlite-journal
+prisma/*.sqlite
+prisma/*.sqlite-journal
+prisma/*.sqlite-wal
+prisma/*.sqlite-shm
+database.sqlite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Git and local tooling
+.git
+.gitignore
+.gitattributes
+
+# Common local development artifacts
+.DS_Store
+.shopify
+.shopify.lock
+.react-router
+extensions/*/dist
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*

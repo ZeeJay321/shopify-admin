@@ -1,0 +1,13 @@
+api_version = "2026-07"
+
+[[extensions]]
+# Change the merchant-facing name of the extension in locales/en.default.json
+name = "t:name"
+handle = "zj-product-health-action"
+type = "ui_extension"
+uid = "192fffba-fd04-f5ea-f224-9c1edfc4dbc492af8e51"
+
+# Only 1 target can be specified for each Admin action extension
+[[extensions.targeting]]
+module = "./src/ActionExtension.tsx"
+target = "admin.product-details.action.render"

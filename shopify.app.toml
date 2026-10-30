@@ -1,0 +1,46 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "c49166f04f4081b4e2394151eb8b1c8a"
+name = "ZJ Commerce Operations"
+application_url = "https://example.com"
+embedded = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+# Read-only. read_products: catalog, collections + scoring; read_inventory:
+# inventory levels and inventory_levels/update; read_locations: location names;
+# read_orders: recent orders (last 60 days) and orders/* webhooks. Orders are
+# protected customer data (level 1): configure access in the Partner Dashboard.
+# Never add read_all_orders or customer scopes without a reviewed need.
+# See README "Scopes" before adding anything here.
+scopes = "read_products,read_inventory,read_locations,read_orders"
+
+[webhooks]
+api_version = "2026-07"
+
+  # Session housekeeping from the app template (not feature webhooks).
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  # Catalog + inventory changes: idempotent cache invalidation (phase 3).
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/catalog"
+  topics = [ "products/create", "products/update", "products/delete", "inventory_levels/update" ]
+
+  # Order changes: invalidate the Order Operations summary (phase 4).
+  # Requires protected customer data access (level 1) for the app.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/catalog"
+  topics = [ "orders/create", "orders/updated" ]
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
