@@ -9,6 +9,9 @@ import { numericIdFromGid } from "./gid";
 
 export type ProductNode = ProductHealthListQuery["products"]["nodes"][number];
 
+/** The extra sales channel scoring accepts (see `scoringChannel`). */
+export type ScoringChannel = { id: string; name: string };
+
 export type ProductRecord = {
   snapshot: ProductSnapshot;
   handle: string;
@@ -21,7 +24,10 @@ export type ProductRecord = {
   inAnyCollection: boolean;
 };
 
-export function toProductRecord(node: ProductNode): ProductRecord {
+export function toProductRecord(
+  node: ProductNode,
+  channel: ScoringChannel | null = null,
+): ProductRecord {
   const variants = node.variants.nodes.map((v) => ({
     title: v.title,
     price: parsePrice(v.price),
@@ -45,6 +51,15 @@ export function toProductRecord(node: ProductNode): ProductRecord {
       variants,
       variantCount: node.variantsCount?.count ?? variants.length,
       publishedToOnlineStore: toStringOrNull(node.onlineStoreUrl) !== null,
+      // Only set when known, so channel-less snapshots are unchanged.
+      ...(channel && typeof node.publishedOnPublication === "boolean"
+        ? {
+            salesChannel: {
+              name: channel.name,
+              published: node.publishedOnPublication,
+            },
+          }
+        : {}),
     },
     handle: node.handle,
     vendor: node.vendor,

@@ -11,6 +11,7 @@ import { toLoaderError } from "../lib/shopify/errors";
 import { toNumericId, toProductGid } from "../lib/shopify/gid";
 import { getProduct } from "../lib/shopify/products.server";
 import { writeAccess } from "../lib/shopify/scopes";
+import { resolveScoringChannel } from "../lib/services/sales-channels.server";
 import { suggestSeo } from "../lib/actions";
 import {
   appCache,
@@ -35,6 +36,7 @@ import {
   CheckRow,
   EmptyState,
   ErrorState,
+  ScoringChannelNote,
   StatusBadge,
 } from "../components/ui";
 import { HorizontalBarChart, ScoreGauge } from "../components/charts";
@@ -49,7 +51,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   try {
     const gid = toProductGid(params.id);
-    const record = await getProduct(admin, gid);
+    const scoring = await resolveScoringChannel(admin, session.shop, appCache);
+    const record = scoring.channel
+      ? await getProduct(admin, gid, scoring.channel)
+      : await getProduct(admin, gid);
     const health = scoreProduct(record.snapshot);
     return {
       error: null,
@@ -73,6 +78,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       }),
       health,
       canWrite,
+      scoring,
     };
   } catch (error) {
     return {
@@ -82,6 +88,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       suggestion: null,
       health: null,
       canWrite,
+      scoring: null,
     };
   }
 };
@@ -95,7 +102,7 @@ export const action = ({ request }: ActionFunctionArgs) =>
   });
 
 export default function ProductHealthDetail() {
-  const { error, product, seo, suggestion, health, canWrite } =
+  const { error, product, seo, suggestion, health, canWrite, scoring } =
     useLoaderData<typeof loader>();
 
   if (error || !product || !health || !seo || !suggestion) {
@@ -264,20 +271,23 @@ export default function ProductHealthDetail() {
       </s-section>
 
       <s-section slot="aside" heading="By area">
-        <HorizontalBarChart
-          label="Score by area"
-          max={100}
-          items={groups.map((g) => {
-            const percent = Math.round((g.earned / g.weight) * 100);
-            return {
-              key: g.id,
-              label: g.label,
-              value: percent,
-              tone: scoreTone(percent),
-              valueText: `${g.earned} / ${g.weight}`,
-            };
-          })}
-        />
+        <s-stack gap="base">
+          <HorizontalBarChart
+            label="Score by area"
+            max={100}
+            items={groups.map((g) => {
+              const percent = Math.round((g.earned / g.weight) * 100);
+              return {
+                key: g.id,
+                label: g.label,
+                value: percent,
+                tone: scoreTone(percent),
+                valueText: `${g.earned} / ${g.weight}`,
+              };
+            })}
+          />
+          {scoring && <ScoringChannelNote {...scoring} />}
+        </s-stack>
       </s-section>
 
       <s-section slot="aside" heading="Quick actions">

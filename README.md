@@ -372,6 +372,8 @@ Checks receive configuration through `evaluate(snapshot, config)` and an optiona
 
 Without `read_publications`, Readiness keeps the old Online Store behaviour and shows a banner explaining it may be inaccurate for headless stores.
 
+**Product Health scoring** uses the same data. Its Publishing check ("online_store", 5 points, weights unchanged) passes when a product is on Online Store **or** on the store's busiest other sales channel ([`scoringChannel`](app/lib/storefront-readiness/channel.ts), resolved once per request by [`sales-channels.server.ts`](app/lib/services/sales-channels.server.ts)). The flag comes from `publishedOnPublication` in the same product query (`@include`d only when there's a channel), so it costs no extra requests. Scoring stays pure: the flag rides on the product snapshot. The dashboard sample, product health summary and readiness caches are keyed by that channel; the invalidation tags are unchanged. The Admin extensions' `/api/product-health/:id` resolves the channel the same way, so they always match the app pages. The product pages say which channels count, or show the permission banner without `read_publications` (Online Store only).
+
 ### Re-approving the new scopes
 
 `read_publications` and `write_publications` are new. After `npm run dev` or `shopify app deploy`, open the app from Shopify Admin and approve the updated access; if no prompt appears, reinstall the app on the dev store.
@@ -477,7 +479,7 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
   The pages label each of these when capped.
 - **Page-level filters:** "has issues", the risk filter and "needs attention" filter the current page, because the app computes them.
 - **Channel product counts** use `Publication.includedProductsCount`, the only count Shopify exposes per publication. It counts products *included* in the channel (which can include scheduled publishes), so it's a close approximation used for the default-channel choice; the check itself reads `publishedOnPublication` per product.
-- **Product Health's own "Online Store" check** (phase 1 scoring) still uses `onlineStoreUrl`, by design: scoring is unchanged. Storefront Readiness is the channel-aware view.
+- **Product Health scoring accepts one extra channel:** the Publishing check passes on Online Store **or** the store's busiest other sales channel (chosen server-side, the same for every page and the Admin extensions). A product sold only on a third, smaller channel still fails it; Readiness's channel selector covers that case.
 - **Table search** uses Shopify's word-prefix matching (`hood` finds "Organic Hoodie", `oodie` doesn't). Order search matches the order name only, never customer fields.
 - **Cursor tables** can't jump to an arbitrary page; Previous/Next only. Readiness tables page freely over the cached result.
 - **No sticky table header:** `s-table` doesn't support one.

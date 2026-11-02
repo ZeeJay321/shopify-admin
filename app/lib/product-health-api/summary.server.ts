@@ -12,6 +12,8 @@ import type { ShopifyApiErrorKind } from "../shopify/errors";
 import { isShopifyApiError, toMerchantMessage } from "../shopify/errors";
 import { toNumericId, toProductGid } from "../shopify/gid";
 import { getProduct } from "../shopify/products.server";
+import type { ScoringChannel } from "../shopify/snapshot";
+import { resolveScoringChannel } from "../services/sales-channels.server";
 import type {
   HealthErrorCode,
   HealthResponse,
@@ -47,6 +49,8 @@ export type HealthSummaryCache = { shop: string; cache: TaggedCache };
  * Validates the id, then loads and scores the product. With `cached`, reads
  * through the cache; entries are tagged with the product id and its
  * inventory item ids so product and inventory webhooks invalidate them.
+ * With `cached`, the scoring sales channel is resolved server-side by the
+ * same rule as the app pages, so the extensions show the same score.
  */
 export async function loadHealthSummary(
   client: AdminGraphqlClient,
@@ -56,11 +60,14 @@ export async function loadHealthSummary(
   try {
     const gid = toProductGid(idParam);
     const productId = toNumericId(gid);
-    const load = () => buildSummary(client, gid);
+    const channel = cached
+      ? (await resolveScoringChannel(client, cached.shop, cached.cache)).channel
+      : null;
+    const load = () => buildSummary(client, gid, channel);
     const { summary } = cached
       ? await cached.cache.getOrLoad(
           cached.shop,
-          productHealthKey(productId),
+          productHealthKey(productId, channel?.id),
           {
             tags: (value) =>
               keyTags.productHealth(
@@ -94,8 +101,11 @@ export async function loadHealthSummary(
 async function buildSummary(
   client: AdminGraphqlClient,
   gid: string,
+  channel: ScoringChannel | null,
 ): Promise<CachedProductHealth> {
-  const record = await getProduct(client, gid);
+  const record = channel
+    ? await getProduct(client, gid, channel)
+    : await getProduct(client, gid);
   const health = scoreProduct(record.snapshot);
   const id = toNumericId(record.snapshot.id);
 

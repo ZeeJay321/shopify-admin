@@ -34,6 +34,13 @@ export type ProductSnapshot = {
   /** Total variants on the product. */
   variantCount: number;
   publishedToOnlineStore: boolean;
+  /**
+   * The store's main non-Online-Store sales channel (e.g. a headless
+   * storefront) and whether this product is published there. Unset or null
+   * when unknown (no read_publications, or no such channel): only Online
+   * Store counts then.
+   */
+  salesChannel?: { name: string; published: boolean } | null;
 };
 
 export type CheckGroup =

@@ -74,3 +74,15 @@ describe("loadStoreHealth sample", () => {
     expect(sample.scoreBuckets).toEqual([0, 0, 0, 0, 0]);
   });
 });
+
+describe("loadStoreHealth scoring channel", () => {
+  it("keys the sample by channel and passes the channel to the product reads", async () => {
+    const cache = new MemoryTaggedCache();
+    const channel = { id: "gid://shopify/Publication/2", name: "Headless" };
+    await loadStoreHealth(client, SHOP, cache);
+    await loadStoreHealth(client, SHOP, cache, channel);
+    await loadStoreHealth(client, SHOP, cache, channel);
+    expect(getProductSample).toHaveBeenCalledTimes(2);
+    expect(getProductSample).toHaveBeenLastCalledWith(client, 250, channel);
+  });
+});

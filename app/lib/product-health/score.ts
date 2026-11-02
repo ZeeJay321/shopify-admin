@@ -16,7 +16,7 @@
  * | Inventory (15)   | out_of_stock     | 10     | proportional to share of tracked variants in stock      |
  * |                  | low_stock        | 5      | proportional to share of tracked variants not low       |
  * | Publishing (10)  | status_active    | 5      | status ACTIVE                                           |
- * |                  | online_store     | 5      | published to the Online Store                           |
+ * |                  | online_store     | 5      | published to Online Store or the store's sales channel  |
  *
  * Status: `pass` = full points, `fail` = 0 points, `warn` = partial.
  * Untracked variants are ignored by inventory checks (they never sell out).
@@ -393,14 +393,37 @@ function checkStatus(p: ProductSnapshot): HealthCheck {
   );
 }
 
+/**
+ * Passes when the product is on Online Store or on the store's main other
+ * sales channel (`salesChannel`), so headless stores aren't penalised for
+ * not using Online Store. Without channel info, Online Store only.
+ */
 function checkOnlineStore(p: ProductSnapshot): HealthCheck {
-  const label = "Online Store";
+  const channel = p.salesChannel ?? null;
+  const label = channel ? "Sales channel" : "Online Store";
   if (p.publishedToOnlineStore) {
     return pass(
       "online_store",
       "publishing",
       label,
       "Published to the Online Store.",
+    );
+  }
+  if (channel?.published) {
+    return pass(
+      "online_store",
+      "publishing",
+      label,
+      `Published to ${channel.name}.`,
+    );
+  }
+  if (channel) {
+    return fail(
+      "online_store",
+      "publishing",
+      label,
+      `Not published to ${channel.name} or the Online Store.`,
+      `Products → open the product → Publishing (right column) → Manage → enable ${channel.name} → Save.`,
     );
   }
   return fail(

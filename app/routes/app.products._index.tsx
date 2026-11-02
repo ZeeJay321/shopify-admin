@@ -28,6 +28,7 @@ import {
 } from "../lib/shopify/product-status";
 import { productTitleSearch } from "../lib/shopify/search";
 import { writeAccess } from "../lib/shopify/scopes";
+import { resolveScoringChannel } from "../lib/services/sales-channels.server";
 import type { Selection } from "../lib/tables";
 import {
   formatSort,
@@ -43,6 +44,7 @@ import {
   DataCapNotice,
   EmptyState,
   ErrorState,
+  ScoringChannelNote,
   SplitGrid,
   StatusBadge,
   Toolbar,
@@ -94,8 +96,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const sort = table.sort ?? { field: "title", dir: "asc" };
 
   try {
+    const scoring = await resolveScoringChannel(admin, session.shop, appCache);
     const [page, count] = await Promise.all([
       getProductsPage(admin, {
+        channel: scoring.channel,
         cursor,
         direction,
         status,
@@ -138,6 +142,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       table: { ...table, sort },
       filters,
       canWrite,
+      scoring,
     };
   } catch (error) {
     return {
@@ -149,6 +154,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       table: { ...table, sort },
       filters,
       canWrite,
+      scoring: null,
     };
   }
 };
@@ -222,6 +228,7 @@ export default function ProductHealthList() {
     table,
     filters,
     canWrite,
+    scoring,
   } = useLoaderData<typeof loader>();
   const url = useTableUrl();
   const loading = useNavigation().state === "loading";
@@ -313,6 +320,7 @@ export default function ProductHealthList() {
         )}
 
         {rows.length > 0 && <PageSummary rows={rows} />}
+        {scoring && <ScoringChannelNote {...scoring} />}
 
         <DataTable<Row>
           label="Products"

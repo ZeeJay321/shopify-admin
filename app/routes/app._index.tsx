@@ -7,6 +7,7 @@ import { appCache } from "../lib/cache/index.server";
 import { loadInventorySummary } from "../lib/services/inventory-risk.server";
 import { loadOrdersSummary } from "../lib/services/orders.server";
 import { loadStoreHealth } from "../lib/services/store-health.server";
+import { resolveScoringChannel } from "../lib/services/sales-channels.server";
 import { isShopifyApiError, toLoaderError } from "../lib/shopify/errors";
 import { writeAccess } from "../lib/shopify/scopes";
 import type { CheckId } from "../lib/product-health/types";
@@ -32,6 +33,7 @@ import {
   DataCapNotice,
   ErrorState,
   PermissionBanner,
+  ScoringChannelNote,
   SplitGrid,
 } from "../components/ui";
 import {
@@ -62,9 +64,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const inventory = optional(loadInventorySummary(admin, shop, appCache));
 
   try {
+    const scoring = await resolveScoringChannel(admin, shop, appCache);
     const [{ counts, sample }, ordersResult, inventoryResult] =
       await Promise.all([
-        loadStoreHealth(admin, shop, appCache),
+        loadStoreHealth(admin, shop, appCache, scoring.channel),
         orders,
         inventory,
       ]);
@@ -91,6 +94,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         : { available: false as const, reason: inventoryResult.reason },
       access: writeAccess(session.scope),
+      scoring,
     };
   } catch (error) {
     return {
@@ -100,6 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orders: null,
       inventory: null,
       access: writeAccess(session.scope),
+      scoring: null,
     };
   }
 };
@@ -116,7 +121,7 @@ const ISSUE_LINKS: Partial<Record<CheckId, string>> = {
 const RISK_ORDER: RiskLevel[] = ["critical", "low", "healthy", "untracked"];
 
 export default function StoreHealth() {
-  const { error, counts, sample, orders, inventory, access } =
+  const { error, counts, sample, orders, inventory, access, scoring } =
     useLoaderData<typeof loader>();
   const next = sample ? nextBestAction(sample.topIssues) : null;
   const missingWrite = [
@@ -381,6 +386,7 @@ export default function StoreHealth() {
             . Order charts use the most recent orders Shopify returns.
           </DataCapNotice>
         )}
+        {sample && scoring && <ScoringChannelNote {...scoring} />}
       </s-stack>
     </s-page>
   );

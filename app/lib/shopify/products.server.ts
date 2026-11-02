@@ -21,7 +21,7 @@ import { runQuery } from "./client";
 import { ShopifyApiError } from "./errors";
 import { collectPages } from "./pagination";
 import type { ProductStatusFilter } from "./product-status";
-import type { ProductRecord } from "./snapshot";
+import type { ProductRecord, ScoringChannel } from "./snapshot";
 import { toProductRecord } from "./snapshot";
 
 // --- Counts -----------------------------------------------------------------
@@ -78,6 +78,8 @@ const PRODUCT_HEALTH_LIST = `#graphql
     $variantsFirst: Int!
     $sortKey: ProductSortKeys = TITLE
     $reverse: Boolean = false
+    $publicationId: ID! = "gid://shopify/Publication/0"
+    $withChannel: Boolean = false
   ) {
     products(
       first: $first
@@ -96,6 +98,10 @@ const PRODUCT_HEALTH_LIST = `#graphql
         status
         description
         onlineStoreUrl
+      publishedOnPublication(publicationId: $publicationId)
+        @include(if: $withChannel)
+        publishedOnPublication(publicationId: $publicationId)
+          @include(if: $withChannel)
         seo { title description }
         options { name values }
         mediaCount { count }
@@ -125,7 +131,14 @@ export type ProductsPageRequest = {
   search?: string | null;
   sort?: { key: ProductSortKey; reverse: boolean };
   pageSize?: number;
+  /** Also read "published to this channel" for scoring (read_publications). */
+  channel?: ScoringChannel | null;
 };
+
+/** Query variables that add the channel flag (skipped without a channel). */
+function channelVariables(channel: ScoringChannel | null | undefined) {
+  return channel ? { publicationId: channel.id, withChannel: true } : {};
+}
 
 export type ProductSortKey = "TITLE" | "UPDATED_AT";
 
@@ -179,6 +192,7 @@ export async function getProductsPage(
     search = null,
     sort = { key: "TITLE", reverse: false },
     pageSize = PRODUCTS_PAGE_SIZE,
+    channel = null,
   }: ProductsPageRequest = {},
 ): Promise<ProductsPage> {
   const paging =
@@ -196,11 +210,12 @@ export async function getProductsPage(
       variantsFirst: LIST_VARIANTS_LIMIT,
       sortKey: sort.key,
       reverse: sort.reverse,
+      ...channelVariables(channel),
     },
   );
 
   return {
-    products: data.products.nodes.map(toProductRecord),
+    products: data.products.nodes.map((node) => toProductRecord(node, channel)),
     pageInfo: {
       hasNextPage: data.products.pageInfo.hasNextPage,
       hasPreviousPage: data.products.pageInfo.hasPreviousPage,
@@ -214,10 +229,11 @@ export async function getProductsPage(
 export async function getProductSample(
   client: AdminGraphqlClient,
   cap: number = HEALTH_SAMPLE_CAP,
+  channel: ScoringChannel | null = null,
 ): Promise<{ products: ProductRecord[]; capped: boolean }> {
   const { nodes, capped } = await collectPages(
     async (cursor, pageSize) => {
-      const page = await getProductsPage(client, { cursor, pageSize });
+      const page = await getProductsPage(client, { cursor, pageSize, channel });
       return { nodes: page.products, pageInfo: page.pageInfo };
     },
     { cap, pageSize: PRODUCTS_PAGE_SIZE },
@@ -228,7 +244,12 @@ export async function getProductSample(
 // --- Detail -----------------------------------------------------------------
 
 const PRODUCT_HEALTH_DETAIL = `#graphql
-  query ProductHealthDetail($id: ID!, $variantsFirst: Int!) {
+  query ProductHealthDetail(
+    $id: ID!
+    $variantsFirst: Int!
+    $publicationId: ID! = "gid://shopify/Publication/0"
+    $withChannel: Boolean = false
+  ) {
     product(id: $id) {
       id
       title
@@ -259,15 +280,16 @@ const PRODUCT_HEALTH_DETAIL = `#graphql
 export async function getProduct(
   client: AdminGraphqlClient,
   id: string,
+  channel: ScoringChannel | null = null,
 ): Promise<ProductRecord> {
   const data = await runQuery<ProductHealthDetailQuery>(
     client,
     "Product detail",
     PRODUCT_HEALTH_DETAIL,
-    { id, variantsFirst: DETAIL_VARIANTS_LIMIT },
+    { id, variantsFirst: DETAIL_VARIANTS_LIMIT, ...channelVariables(channel) },
   );
   if (!data.product) {
     throw new ShopifyApiError("not_found", "Product detail", "no product");
   }
-  return toProductRecord(data.product);
+  return toProductRecord(data.product, channel);
 }

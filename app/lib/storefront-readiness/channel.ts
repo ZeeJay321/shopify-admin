@@ -19,6 +19,19 @@ export type ChannelChoice = {
   headlessHint: boolean;
 };
 
+/**
+ * The channel Product Health scoring accepts besides Online Store: the
+ * busiest other channel with products (ties: name, then id), or null.
+ */
+export function scoringChannel(
+  channels: readonly SalesChannel[],
+): SalesChannel | null {
+  return chooseChannel(
+    channels.filter((c) => !c.isOnlineStore),
+    null,
+  ).channel;
+}
+
 export function chooseChannel(
   channels: readonly SalesChannel[],
   requestedId: string | null,

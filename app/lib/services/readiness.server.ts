@@ -11,19 +11,17 @@
 
 import type { TaggedCache } from "../cache/types";
 import { cacheTags } from "../cache/types";
-import { keyTags, readinessKey, salesChannelsKey } from "../cache/keys";
+import { keyTags, readinessKey } from "../cache/keys";
 import { HEALTH_SAMPLE_CAP } from "../config";
 import type { AdminGraphqlClient } from "../shopify/client";
 import { getCollections } from "../shopify/collections.server";
 import { isShopifyApiError } from "../shopify/errors";
 import { productNumericIdOrNull } from "../shopify/gid";
 import { getProductSample } from "../shopify/products.server";
-import {
-  getPublishedFlags,
-  getSalesChannels,
-} from "../shopify/publications.server";
+import { getPublishedFlags } from "../shopify/publications.server";
+import { loadSalesChannels } from "./sales-channels.server";
 import { scoreProduct } from "../product-health";
-import type { ProductRecord } from "../shopify/snapshot";
+import type { ProductRecord, ScoringChannel } from "../shopify/snapshot";
 import type {
   CheckConfig,
   ReadinessCollection,
@@ -35,7 +33,9 @@ import type {
 } from "../storefront-readiness";
 import { DEFAULT_CHECKS, evaluateReadiness } from "../storefront-readiness";
 import type { ChannelChoice } from "../storefront-readiness/channel";
-import { chooseChannel } from "../storefront-readiness/channel";
+import { chooseChannel, scoringChannel } from "../storefront-readiness/channel";
+
+export { loadSalesChannels };
 
 export async function loadReadiness(
   client: AdminGraphqlClient,
@@ -43,14 +43,19 @@ export async function loadReadiness(
   cache: TaggedCache,
   checks: readonly StorefrontCheck[] = DEFAULT_CHECKS,
   config: CheckConfig = { channel: null },
+  /** Channel Product Health scores accept besides Online Store. */
+  scoring: ScoringChannel | null = null,
 ): Promise<ReadinessReport> {
+  const key = scoring
+    ? `${config.channel?.id ?? "default"}|${scoring.id}`
+    : config.channel?.id;
   return cache.getOrLoad(
     shop,
-    readinessKey(config.channel?.id),
+    readinessKey(key),
     { tags: keyTags.readiness(shop) },
     async () => {
       const [products, collections] = await Promise.all([
-        getProductSample(client, HEALTH_SAMPLE_CAP),
+        getProductSample(client, HEALTH_SAMPLE_CAP, scoring),
         loadCollectionsOrNull(client),
       ]);
       const readinessProducts = products.products.map(toReadinessProduct);
@@ -79,27 +84,6 @@ export async function loadReadiness(
   );
 }
 
-/** Sales channels, or null when read_publications isn't granted. */
-export async function loadSalesChannels(
-  client: AdminGraphqlClient,
-  shop: string,
-  cache: TaggedCache,
-): Promise<SalesChannel[] | null> {
-  try {
-    return await cache.getOrLoad(
-      shop,
-      salesChannelsKey,
-      { tags: keyTags.salesChannels(shop) },
-      () => getSalesChannels(client),
-    );
-  } catch (error) {
-    if (!isShopifyApiError(error) || error.kind !== "access_denied") {
-      throw error;
-    }
-    return null;
-  }
-}
-
 export type ReadinessView = {
   report: ReadinessReport;
   /** null = read_publications missing (Online Store by URL is used). */
@@ -119,9 +103,15 @@ export async function loadReadinessView(
   const channel = choice?.channel
     ? { id: choice.channel.id, name: choice.channel.name }
     : null;
-  const report = await loadReadiness(client, shop, cache, DEFAULT_CHECKS, {
-    channel,
-  });
+  const scoring = channels ? scoringChannel(channels) : null;
+  const report = await loadReadiness(
+    client,
+    shop,
+    cache,
+    DEFAULT_CHECKS,
+    { channel },
+    scoring ? { id: scoring.id, name: scoring.name } : null,
+  );
   return { report, channels, choice };
 }
 

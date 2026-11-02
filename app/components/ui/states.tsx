@@ -286,3 +286,38 @@ export function LiveRegion({
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+/**
+ * Explains which sales channels the Publishing check counts, so scores are
+ * explainable; without read_publications, the same banner as Readiness.
+ */
+export function ScoringChannelNote({
+  channel,
+  scopeMissing,
+}: {
+  channel: { name: string } | null;
+  scopeMissing: boolean;
+}) {
+  if (scopeMissing) {
+    return (
+      <s-stack gap="small-200">
+        <PermissionBanner
+          kind="read"
+          feature="sales channels"
+          scopes={["read publications"]}
+        />
+        <DataCapNotice>
+          Until then, Publishing only counts Online Store, which can lower
+          scores for headless stores.
+        </DataCapNotice>
+      </s-stack>
+    );
+  }
+  return (
+    <DataCapNotice>
+      {channel
+        ? `Publishing counts products on Online Store or ${channel.name}.`
+        : "Publishing counts products on Online Store."}
+    </DataCapNotice>
+  );
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseChannel } from "./channel";
+import { chooseChannel, scoringChannel } from "./channel";
 import type { SalesChannel } from "./types";
 
 const channel = (
@@ -79,5 +79,22 @@ describe("chooseChannel", () => {
       reason: "fallback",
       headlessHint: false,
     });
+  });
+});
+
+describe("scoringChannel", () => {
+  it("picks the busiest non-Online-Store channel, even when Online Store is used", () => {
+    expect(
+      scoringChannel([
+        online(50),
+        channel("pos", "POS", 3),
+        channel("h", "Headless", 172),
+      ])?.id,
+    ).toBe("h");
+  });
+
+  it("is null when no other channel has products", () => {
+    expect(scoringChannel([online(50), channel("pos", "POS", 0)])).toBeNull();
+    expect(scoringChannel([])).toBeNull();
   });
 });

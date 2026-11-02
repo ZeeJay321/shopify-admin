@@ -4,7 +4,11 @@
  */
 
 import type { TaggedCache } from "../cache/types";
-import { keyTags, storeCountsKey, storeHealthSampleKey } from "../cache/keys";
+import {
+  keyTags,
+  storeCountsKey,
+  storeHealthSampleKeyFor,
+} from "../cache/keys";
 import { HEALTH_SAMPLE_CAP } from "../config";
 import type { IssueCount } from "../product-health";
 import {
@@ -18,6 +22,7 @@ import {
 import type { CheckGroup } from "../product-health/types";
 import type { AdminGraphqlClient } from "../shopify/client";
 import type { StoreCounts } from "../shopify/products.server";
+import type { ScoringChannel } from "../shopify/snapshot";
 import { getProductSample, getStoreCounts } from "../shopify/products.server";
 
 export type StoreHealthSample = {
@@ -41,6 +46,8 @@ export async function loadStoreHealth(
   client: AdminGraphqlClient,
   shop: string,
   cache: TaggedCache,
+  /** Sales channel scoring accepts besides Online Store (null: Online Store only). */
+  channel: ScoringChannel | null = null,
 ): Promise<{ counts: StoreCounts; sample: StoreHealthSample }> {
   const [counts, sample] = await Promise.all([
     cache.getOrLoad(
@@ -51,9 +58,9 @@ export async function loadStoreHealth(
     ),
     cache.getOrLoad(
       shop,
-      storeHealthSampleKey,
+      storeHealthSampleKeyFor(channel?.id),
       { tags: keyTags.storeHealthSample(shop) },
-      () => loadSample(client),
+      () => loadSample(client, channel),
     ),
   ]);
   return { counts, sample };
@@ -61,8 +68,9 @@ export async function loadStoreHealth(
 
 async function loadSample(
   client: AdminGraphqlClient,
+  channel: ScoringChannel | null,
 ): Promise<StoreHealthSample> {
-  const sample = await getProductSample(client, HEALTH_SAMPLE_CAP);
+  const sample = await getProductSample(client, HEALTH_SAMPLE_CAP, channel);
   const results = sample.products.map((p) => scoreProduct(p.snapshot));
   const health = aggregateStoreHealth(results);
   const groupTotals = new Map<CheckGroup, number>();
