@@ -17,6 +17,7 @@ import { startOfDayIso } from "../order-ops/dates";
 import type { OrderSnapshot } from "../order-ops/types";
 import type {
   OrderCountsQuery,
+  OrdersMatchingCountQuery,
   RecentOrdersQuery,
   ShopTimezoneQuery,
 } from "../../types/admin.generated";
@@ -47,15 +48,21 @@ export const UNFULFILLED_SEARCH = "status:open fulfillment_status:unfulfilled";
 
 export type OrderCounts = { today: ProductCount; unfulfilled: ProductCount };
 
+/**
+ * `meta`, when given, receives the shop timezone this already queries, so
+ * charts can group by shop day without a second request.
+ */
 export async function getOrderCounts(
   client: AdminGraphqlClient,
   now: Date = new Date(),
+  meta?: { timeZone?: string },
 ): Promise<OrderCounts> {
   const { shop } = await runQuery<ShopTimezoneQuery>(
     client,
     "Shop timezone",
     SHOP_TIMEZONE,
   );
+  if (meta) meta.timeZone = shop.ianaTimezone;
   const data = await runQuery<OrderCountsQuery>(
     client,
     "Order counts",
@@ -82,6 +89,8 @@ const RECENT_ORDERS = `#graphql
     $before: String
     $query: String
     $lineItemsFirst: Int!
+    $sortKey: OrderSortKeys = CREATED_AT
+    $reverse: Boolean = true
   ) {
     orders(
       first: $first
@@ -89,8 +98,8 @@ const RECENT_ORDERS = `#graphql
       last: $last
       before: $before
       query: $query
-      sortKey: CREATED_AT
-      reverse: true
+      sortKey: $sortKey
+      reverse: $reverse
     ) {
       nodes {
         id
@@ -120,8 +129,35 @@ export type OrdersPageRequest = {
   direction?: "next" | "prev";
   /** Shopify order search syntax, built by the caller from filters. */
   search?: string | null;
+  /** Default newest first. */
+  sort?: { key: OrderSortKey; reverse: boolean };
   pageSize?: number;
 };
+
+export type OrderSortKey = "CREATED_AT" | "TOTAL_PRICE";
+
+const ORDERS_MATCHING_COUNT = `#graphql
+  query OrdersMatchingCount($query: String) {
+    ordersCount(query: $query, limit: null) { count precision }
+  }
+`;
+
+/** Count for "Showing 21-40 of N" (same search as the table). */
+export async function getOrdersCount(
+  client: AdminGraphqlClient,
+  query: string | null,
+): Promise<ProductCount> {
+  const data = await runQuery<OrdersMatchingCountQuery>(
+    client,
+    "Order count",
+    ORDERS_MATCHING_COUNT,
+    { query },
+  );
+  return {
+    count: data.ordersCount?.count ?? 0,
+    atLeast: data.ordersCount?.precision === "AT_LEAST",
+  };
+}
 
 export type OrdersPage = {
   orders: OrderSnapshot[];
@@ -139,6 +175,7 @@ export async function getOrdersPage(
     cursor = null,
     direction = "next",
     search = null,
+    sort = { key: "CREATED_AT", reverse: true },
     pageSize = ORDERS_PAGE_SIZE,
   }: OrdersPageRequest = {},
 ): Promise<OrdersPage> {
@@ -151,7 +188,13 @@ export async function getOrdersPage(
     client,
     "Orders",
     RECENT_ORDERS,
-    { ...paging, query: search, lineItemsFirst: ORDER_LINE_ITEMS_LIMIT },
+    {
+      ...paging,
+      query: search,
+      lineItemsFirst: ORDER_LINE_ITEMS_LIMIT,
+      sortKey: sort.key,
+      reverse: sort.reverse,
+    },
   );
   const { pageInfo } = data.orders;
   return {

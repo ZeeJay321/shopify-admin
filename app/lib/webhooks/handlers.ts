@@ -76,6 +76,22 @@ const ordersChanged: WebhookHandler = ({ shop, cache }) => {
   cache.invalidateTags([cacheTags.orders(shop)]);
 };
 
+/**
+ * product_publications/create|update|delete (phase 6, read_publications):
+ * a product was (un)published on a sales channel. Readiness reports are
+ * cached per channel, so drop them all plus the channel counts.
+ */
+const productPublicationChanged: WebhookHandler = ({
+  shop,
+  payload,
+  cache,
+}) => {
+  const productId = readNumericId(payload, "product_id");
+  const tags = [cacheTags.readiness(shop), cacheTags.publications(shop)];
+  if (productId) tags.push(cacheTags.product(shop, productId));
+  cache.invalidateTags(tags);
+};
+
 export const webhookHandlers = {
   PRODUCTS_CREATE: productHandler(PRODUCT_TOPICS.PRODUCTS_CREATE),
   PRODUCTS_UPDATE: productHandler(PRODUCT_TOPICS.PRODUCTS_UPDATE),
@@ -83,6 +99,9 @@ export const webhookHandlers = {
   INVENTORY_LEVELS_UPDATE: inventoryLevelsUpdate,
   ORDERS_CREATE: ordersChanged,
   ORDERS_UPDATED: ordersChanged,
+  PRODUCT_PUBLICATIONS_CREATE: productPublicationChanged,
+  PRODUCT_PUBLICATIONS_UPDATE: productPublicationChanged,
+  PRODUCT_PUBLICATIONS_DELETE: productPublicationChanged,
 } satisfies Record<string, WebhookHandler>;
 
 export type SupportedTopic = keyof typeof webhookHandlers;

@@ -60,3 +60,26 @@ export function formatRelative(iso: string, now: Date): string {
 export function ratio(part: number, total: number): number {
   return total > 0 ? Math.min(1, Math.max(0, part / total)) : 0;
 }
+
+/** "2026-10-30" -> "Oct 30" (calendar day, no timezone shift). */
+export function formatDay(key: string): string {
+  const date = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return key;
+  return new Intl.DateTimeFormat(LOCALE, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+/** "2026-10-30" -> "Fri, Oct 30". */
+export function formatDayLong(key: string): string {
+  const date = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return key;
+  return new Intl.DateTimeFormat(LOCALE, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}

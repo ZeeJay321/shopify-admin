@@ -14,7 +14,7 @@
  * | SEO         | SEO titles                | info     | 5      |
  * | SEO         | SEO descriptions          | info     | 5      |
  * | Publishing  | Handles                   | critical | 5      |
- * | Publishing  | Published to Online Store | critical | 10     |
+ * | Publishing  | Published to sales channel| critical | 10     |
  * | Collections | Collections exist, non-empty | warning | 5     |
  * | Collections | Products in a collection  | warning  | 10     |
  *
@@ -24,6 +24,7 @@
 import { MIN_DESCRIPTION_LENGTH, isPlaceholderTitle } from "../product-health";
 import type {
   AffectedResource,
+  CheckConfig,
   CheckEvaluation,
   ReadinessCollection,
   ReadinessProduct,
@@ -35,12 +36,16 @@ export function liveProducts(snapshot: StorefrontSnapshot): ReadinessProduct[] {
   return snapshot.products.filter((p) => p.status === "ACTIVE");
 }
 
-export function productResource(p: ReadinessProduct): AffectedResource {
+export function productResource(
+  p: ReadinessProduct,
+  problem?: string,
+): AffectedResource {
   return {
     kind: "product",
     id: p.id,
     title: p.title || "(untitled)",
     handle: p.handle,
+    ...(problem ? { problem } : {}),
   };
 }
 
@@ -52,13 +57,16 @@ function collectionResource(c: ReadinessCollection): AffectedResource {
 export function liveProductRatio(
   snapshot: StorefrontSnapshot,
   ok: (p: ReadinessProduct) => boolean,
+  problem?: string | ((p: ReadinessProduct) => string),
 ): CheckEvaluation {
   const live = liveProducts(snapshot);
   if (live.length === 0) return { score: null, affectedResources: [] };
   const failing = live.filter((p) => !ok(p));
   return {
     score: (live.length - failing.length) / live.length,
-    affectedResources: failing.map(productResource),
+    affectedResources: failing.map((p) =>
+      productResource(p, typeof problem === "function" ? problem(p) : problem),
+    ),
   };
 }
 
@@ -70,7 +78,8 @@ const hasTitle: StorefrontCheck = {
   group: "products",
   severity: "critical",
   weight: 10,
-  evaluate: (s) => liveProductRatio(s, (p) => p.title.trim() !== ""),
+  evaluate: (s) =>
+    liveProductRatio(s, (p) => p.title.trim() !== "", "Missing title"),
 };
 
 const noPlaceholderTitles: StorefrontCheck = {
@@ -81,7 +90,12 @@ const noPlaceholderTitles: StorefrontCheck = {
   group: "products",
   severity: "warning",
   weight: 5,
-  evaluate: (s) => liveProductRatio(s, (p) => !isPlaceholderTitle(p.title)),
+  evaluate: (s) =>
+    liveProductRatio(
+      s,
+      (p) => !isPlaceholderTitle(p.title),
+      (p) => `Placeholder title "${p.title}"`,
+    ),
 };
 
 const descriptions: StorefrontCheck = {
@@ -95,6 +109,10 @@ const descriptions: StorefrontCheck = {
     liveProductRatio(
       s,
       (p) => p.description.trim().length >= MIN_DESCRIPTION_LENGTH,
+      (p) =>
+        p.description.trim() === ""
+          ? "No description"
+          : `Description is ${p.description.trim().length} characters`,
     ),
 };
 
@@ -106,7 +124,7 @@ const images: StorefrontCheck = {
   group: "products",
   severity: "critical",
   weight: 10,
-  evaluate: (s) => liveProductRatio(s, (p) => p.imageCount > 0),
+  evaluate: (s) => liveProductRatio(s, (p) => p.imageCount > 0, "No images"),
 };
 
 const prices: StorefrontCheck = {
@@ -122,6 +140,7 @@ const prices: StorefrontCheck = {
       (p) =>
         p.variants.length > 0 &&
         p.variants.every((v) => v.price !== null && v.price > 0),
+      "A variant has no price or a price of 0",
     ),
 };
 
@@ -139,6 +158,7 @@ const notOutOfStockOnly: StorefrontCheck = {
       (p) =>
         p.variants.length === 0 ||
         p.variants.some((v) => !v.tracked || (v.inventoryQuantity ?? 0) > 0),
+      "Every tracked variant is out of stock",
     ),
 };
 
@@ -149,7 +169,12 @@ const seoTitles: StorefrontCheck = {
   group: "seo",
   severity: "info",
   weight: 5,
-  evaluate: (s) => liveProductRatio(s, (p) => (p.seoTitle ?? "").trim() !== ""),
+  evaluate: (s) =>
+    liveProductRatio(
+      s,
+      (p) => (p.seoTitle ?? "").trim() !== "",
+      "No SEO title",
+    ),
 };
 
 const seoDescriptions: StorefrontCheck = {
@@ -160,7 +185,11 @@ const seoDescriptions: StorefrontCheck = {
   severity: "info",
   weight: 5,
   evaluate: (s) =>
-    liveProductRatio(s, (p) => (p.seoDescription ?? "").trim() !== ""),
+    liveProductRatio(
+      s,
+      (p) => (p.seoDescription ?? "").trim() !== "",
+      "No SEO description",
+    ),
 };
 
 const handles: StorefrontCheck = {
@@ -170,9 +199,15 @@ const handles: StorefrontCheck = {
   group: "publishing",
   severity: "critical",
   weight: 5,
-  evaluate: (s) => liveProductRatio(s, (p) => p.handle.trim() !== ""),
+  evaluate: (s) =>
+    liveProductRatio(s, (p) => p.handle.trim() !== "", "Missing handle"),
 };
 
+/**
+ * Publishing: checks the configured sales channel (e.g. a headless
+ * storefront's channel) when one is given, else Online Store via its URL.
+ * The id stays "online_store" so stored links and tests keep working.
+ */
 const onlineStore: StorefrontCheck = {
   id: "online_store",
   name: "Published to the Online Store",
@@ -181,7 +216,38 @@ const onlineStore: StorefrontCheck = {
   group: "publishing",
   severity: "critical",
   weight: 10,
-  evaluate: (s) => liveProductRatio(s, (p) => p.publishedToOnlineStore),
+  describe: (config: CheckConfig) =>
+    config.channel
+      ? {
+          name: `Published to ${config.channel.name}`,
+          description: `Live products should be published to the ${config.channel.name} sales channel.`,
+        }
+      : {
+          name: "Published to the Online Store",
+          description:
+            "Live products should be published to the Online Store sales channel.",
+        },
+  evaluate: (s, config) => {
+    const channel = config?.channel ?? null;
+    if (!channel) {
+      return liveProductRatio(
+        s,
+        (p) => p.publishedToOnlineStore,
+        "Not published to Online Store",
+      );
+    }
+    // Unknown publication state (flags couldn't be read): not applicable.
+    if (
+      liveProducts(s).some((p) => typeof p.publishedToChannel !== "boolean")
+    ) {
+      return { score: null, affectedResources: [] };
+    }
+    return liveProductRatio(
+      s,
+      (p) => p.publishedToChannel === true,
+      `Not published to ${channel.name}`,
+    );
+  },
 };
 
 const collectionsNonEmpty: StorefrontCheck = {

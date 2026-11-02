@@ -7,8 +7,10 @@ import {
   planInventoryAdjustment,
 } from "../../lib/actions";
 import {
+  Acknowledgement,
   BeforeAfter,
   ResultBanner,
+  StepHeader,
   Warnings,
   fieldError,
   newActionKey,
@@ -127,7 +129,12 @@ export function InventoryAdjustModal({
 
         {!done && step === "edit" && (
           <>
-            <s-text color="subdued">Step 1 of 2 · {label}</s-text>
+            <StepHeader
+              step={1}
+              of={2}
+              title="Set the new quantity"
+              detail={label}
+            />
             {multiLocation ? (
               <s-select
                 label="Location"
@@ -168,13 +175,10 @@ export function InventoryAdjustModal({
             <Warnings warnings={plan.warnings} />
             {plan.requiresExtraConfirmation && (
               <>
-                <s-divider />
-                <s-checkbox
+                <Acknowledgement
                   label="I've checked this change is correct"
                   checked={acknowledged}
-                  onChange={(event) =>
-                    setAcknowledged(event.currentTarget.checked)
-                  }
+                  onChange={setAcknowledged}
                 />
               </>
             )}
@@ -183,14 +187,16 @@ export function InventoryAdjustModal({
 
         {!done && step === "confirm" && (
           <>
-            <s-text color="subdued">Step 2 of 2 · Review and confirm</s-text>
-            <s-paragraph>
-              {describeInventoryChange(
+            <StepHeader
+              step={2}
+              of={2}
+              title="Review and confirm"
+              detail={describeInventoryChange(
                 label,
                 location?.name ?? "this location",
                 plan.summary,
               )}
-            </s-paragraph>
+            />
             <BeforeAfter
               rows={[
                 {

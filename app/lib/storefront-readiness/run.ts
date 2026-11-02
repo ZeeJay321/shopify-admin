@@ -10,6 +10,7 @@
 import { READINESS_AFFECTED_LIMIT, READINESS_WARN_AT } from "../config";
 import { DEFAULT_CHECKS, liveProducts } from "./checks";
 import type {
+  CheckConfig,
   CheckResult,
   CheckStatus,
   ReadinessReport,
@@ -51,14 +52,19 @@ export function evaluateReadiness(
     affectedLimit = READINESS_AFFECTED_LIMIT,
     warnAt = READINESS_WARN_AT,
   }: { affectedLimit?: number; warnAt?: number } = {},
+  config: CheckConfig = { channel: null },
 ): ReadinessReport {
   const results: CheckResult[] = checks.map((check) => {
-    const { score, affectedResources } = check.evaluate(snapshot);
+    const { score, affectedResources } = check.evaluate(snapshot, config);
     const clamped = score === null ? null : Math.min(1, Math.max(0, score));
-    return {
-      id: check.id,
+    const text = check.describe?.(config) ?? {
       name: check.name,
       description: check.description,
+    };
+    return {
+      id: check.id,
+      name: text.name,
+      description: text.description,
       group: check.group,
       severity: check.severity,
       weight: check.weight,

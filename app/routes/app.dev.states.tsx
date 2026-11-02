@@ -1,29 +1,57 @@
+import { useEffect, useState } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ShopifyApiError, toMerchantMessage } from "../lib/shopify/errors";
 import {
+  Acknowledgement,
   BeforeAfter,
   CharCounter,
   ResultBanner,
+  StepHeader,
 } from "../components/actions/shared";
 import {
+  Callout,
+  Card,
   CardGrid,
   CheckRow,
   DataCapNotice,
   EmptyState,
   ErrorState,
-  LabeledProgress,
-  MetricCard,
   PageSkeleton,
   PermissionBanner,
-  ProportionBars,
   RiskBadge,
-  ScoreIndicator,
   SeverityBadge,
+  SplitGrid,
   StatusBadge,
   TableSkeleton,
 } from "../components/ui";
+import {
+  ColumnChart,
+  DonutChart,
+  Histogram,
+  HorizontalBarChart,
+  InlineScoreBar,
+  MetricCard,
+  ScoreGauge,
+  StackedProportionBar,
+} from "../components/charts";
+
+// Fixture values for this dev gallery only; real pages use loader data.
+const DEMO_DAYS = [3, 5, 2, 0, 7, 4, 6, 9, 1, 3, 5, 8, 2, 4].map(
+  (value, i) => ({
+    key: `d${i}`,
+    label: `Oct ${17 + i}`,
+    detail: `Oct ${17 + i}`,
+    value,
+  }),
+);
+const DEMO_RISK = [
+  { key: "critical", label: "Critical", value: 13, tone: "critical" },
+  { key: "low", label: "Low stock", value: 22, tone: "warning" },
+  { key: "healthy", label: "Healthy", value: 440, tone: "success" },
+  { key: "untracked", label: "Not tracked", value: 25, tone: "neutral" },
+] as const;
 
 /**
  * DEV ONLY: a gallery of every page state (empty, loading, error,
@@ -52,57 +80,162 @@ export default function DevStates() {
         Store health
       </s-link>
 
-      <s-section heading="Scores and metrics">
-        <s-stack gap="base">
-          <CardGrid>
-            <MetricCard
-              label="Products"
-              value="1,250"
-              subtext="1,200 active · 50 draft"
-              href="/app/products"
-              linkLabel="View products"
-            />
-            <MetricCard
-              label="Needs attention"
-              value="8"
-              tone="critical"
-              toneLabel="Review"
-            />
-            <MetricCard
-              label="All clear"
-              value="0"
-              tone="success"
-              toneLabel="All clear"
-            />
-            <MetricCard
-              label="Unavailable"
-              value="—"
-              subtext="Approve order access to see this."
-            />
-          </CardGrid>
-          <CardGrid columns={3}>
-            <ScoreIndicator score={92} />
-            <ScoreIndicator score={64} />
-            <ScoreIndicator score={31} />
-          </CardGrid>
-          <s-stack direction="inline" gap="base">
-            <ScoreIndicator score={92} size="compact" />
-            <ScoreIndicator score={null} />
-          </s-stack>
-          <LabeledProgress label="Content" value={24} max={30} tone="success" />
-          <ProportionBars
-            total={500}
-            segments={[
-              { key: "c", label: "Critical", value: 13, tone: "critical" },
-              { key: "l", label: "Low stock", value: 2, tone: "warning" },
-              { key: "h", label: "Healthy", value: 485, tone: "success" },
-            ]}
-          />
-          <DataCapNotice>
-            Based on 250 products (capped at 250, sorted by title).
-          </DataCapNotice>
-        </s-stack>
+      <s-section heading="Color tokens">
+        <TokenCheck />
       </s-section>
+
+      <s-stack gap="base">
+        <Callout
+          heading="Fix missing images"
+          body="12 products have too few images."
+          action={{ label: "See affected products", href: "/app/readiness" }}
+        />
+        <CardGrid>
+          <MetricCard
+            label="Products"
+            value="1,250"
+            tone="info"
+            href="/app/products"
+            linkLabel="View products"
+          >
+            <StackedProportionBar
+              label="Products by status"
+              size="thin"
+              segments={[
+                { key: "a", label: "Active", value: 1200, tone: "success" },
+                { key: "d", label: "Draft", value: 50, tone: "info" },
+              ]}
+            />
+          </MetricCard>
+          <MetricCard
+            label="Needs attention"
+            value="8"
+            tone="critical"
+            toneLabel="3 high"
+            trend={DEMO_DAYS.map((d) => d.value)}
+            trendLabel="Orders per day, last 14 days"
+          />
+          <MetricCard
+            label="All clear"
+            value="0"
+            tone="success"
+            toneLabel="All clear"
+          />
+          <MetricCard
+            label="Unavailable"
+            value="—"
+            subtext="Approve order access to see this."
+          />
+        </CardGrid>
+
+        <SplitGrid ratio="1:2">
+          <Card heading="ScoreGauge">
+            <CardGrid columns={3}>
+              <ScoreGauge score={92} label="Demo" size="small" />
+              <ScoreGauge score={64} label="Demo" size="small" />
+              <ScoreGauge score={0} label="Demo" size="small" />
+            </CardGrid>
+            <ScoreGauge score={100} label="Demo" size="medium" />
+            <ScoreGauge score={null} label="Demo" />
+          </Card>
+          <Card heading="HorizontalBarChart" subheading="Tones, links, empty">
+            <HorizontalBarChart
+              label="Demo bars"
+              max={100}
+              items={[
+                {
+                  key: "c",
+                  label: "Content",
+                  value: 90,
+                  tone: "success",
+                  valueText: "27 / 30 pts",
+                },
+                {
+                  key: "s",
+                  label: "SEO",
+                  value: 55,
+                  tone: "warning",
+                  valueText: "11 / 20 pts",
+                },
+                {
+                  key: "i",
+                  label:
+                    "A very long label that has to wrap on narrow embedded widths without overflowing",
+                  value: 20,
+                  tone: "critical",
+                  href: "/app/inventory",
+                },
+              ]}
+            />
+            <HorizontalBarChart
+              label="Empty"
+              items={[]}
+              emptyMessage="No issues found. Nice work."
+            />
+          </Card>
+        </SplitGrid>
+
+        <SplitGrid ratio="1:1">
+          <Card heading="Histogram">
+            <Histogram counts={[4, 9, 21, 60, 156]} />
+            <Histogram counts={[0, 0, 0, 0, 0]} />
+          </Card>
+          <Card heading="DonutChart">
+            <DonutChart
+              label="Demo risk"
+              totalLabel="variants"
+              segments={DEMO_RISK}
+            />
+            <DonutChart
+              label="Single segment"
+              totalLabel="variants"
+              segments={[
+                { key: "h", label: "Healthy", value: 10, tone: "success" },
+              ]}
+            />
+            <DonutChart label="Empty" totalLabel="variants" segments={[]} />
+          </Card>
+        </SplitGrid>
+
+        <SplitGrid ratio="2:1">
+          <Card
+            heading="ColumnChart"
+            subheading="Hover or focus and use arrow keys"
+          >
+            <ColumnChart
+              label="Demo orders per day"
+              valueLabel="Orders"
+              data={DEMO_DAYS}
+            />
+            <ColumnChart
+              label="One day"
+              valueLabel="Orders"
+              data={DEMO_DAYS.slice(0, 1)}
+            />
+            <ColumnChart
+              label="Empty"
+              valueLabel="Orders"
+              data={[]}
+              emptyMessage="No orders in the last 14 days."
+            />
+          </Card>
+          <Card heading="StackedProportionBar and InlineScoreBar">
+            <StackedProportionBar label="Demo risk" segments={DEMO_RISK} />
+            <StackedProportionBar
+              label="Empty"
+              segments={[]}
+              emptyMessage="No recent orders."
+            />
+            <InlineScoreBar score={92} />
+            <InlineScoreBar score={64} />
+            <InlineScoreBar score={12} />
+          </Card>
+        </SplitGrid>
+
+        <DataCapNotice>
+          Based on 250 products (capped at 250, sorted by title).
+        </DataCapNotice>
+      </s-stack>
 
       <s-section heading="Badges">
         <s-stack direction="inline" gap="small-200">
@@ -163,7 +296,10 @@ export default function DevStates() {
       <s-section heading="Loading">
         <s-stack gap="base">
           <TableSkeleton rows={3} />
-          <PageSkeleton />
+          <PageSkeleton variant="dashboard" />
+          <PageSkeleton variant="table" />
+          <PageSkeleton variant="detail" />
+          <PageSkeleton variant="readiness" />
         </s-stack>
       </s-section>
 
@@ -209,6 +345,17 @@ export default function DevStates() {
               message: "The app needs permission to make changes.",
             }}
           />
+          <StepHeader
+            step={1}
+            of={2}
+            title="Edit the search listing"
+            detail="For Organic Hoodie."
+          />
+          <Acknowledgement
+            label="I understand these issues and want to publish anyway"
+            checked={false}
+            onChange={() => {}}
+          />
           <CharCounter length={45} max={70} />
           <CharCounter length={66} max={70} />
           <CharCounter length={75} max={70} />
@@ -220,6 +367,25 @@ export default function DevStates() {
         </s-stack>
       </s-section>
     </s-page>
+  );
+}
+
+/** Shows whether Polaris color tokens reach this iframe (else fallbacks). */
+function TokenCheck() {
+  const [resolved, setResolved] = useState<boolean | null>(null);
+  useEffect(() => {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue("--p-color-bg-fill-success")
+      .trim();
+    setResolved(value !== "");
+  }, []);
+  if (resolved === null) return <s-text color="subdued">Checking…</s-text>;
+  return (
+    <s-text>
+      {resolved
+        ? "Polaris color tokens are available; charts use them."
+        : "Polaris color tokens aren't exposed here; charts use the fallback palette in charts.css."}
+    </s-text>
   );
 }
 

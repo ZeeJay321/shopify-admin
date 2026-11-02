@@ -273,3 +273,24 @@ describe("phase 4 tags: orders and readiness", () => {
     });
   });
 });
+
+describe("product_publications webhooks", () => {
+  it.each([
+    "PRODUCT_PUBLICATIONS_CREATE",
+    "PRODUCT_PUBLICATIONS_UPDATE",
+    "PRODUCT_PUBLICATIONS_DELETE",
+  ] as const)("%s drops readiness, channels and the product entry", (topic) => {
+    const cache = new MemoryTaggedCache();
+    const invalidateTags = vi.spyOn(cache, "invalidateTags");
+    webhookHandlers[topic]({
+      shop: "s.myshopify.com",
+      payload: { product_id: 42, publication_id: 7 },
+      cache,
+    });
+    expect(invalidateTags).toHaveBeenCalledWith([
+      "shop:s.myshopify.com:readiness",
+      "shop:s.myshopify.com:publications",
+      "shop:s.myshopify.com:product:42",
+    ]);
+  });
+});

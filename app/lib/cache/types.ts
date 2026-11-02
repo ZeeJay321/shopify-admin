@@ -59,6 +59,8 @@ export const cacheTags = {
   inventory: (shop: string) => `shop:${shop}:inventory`,
   orders: (shop: string) => `shop:${shop}:orders`,
   readiness: (shop: string) => `shop:${shop}:readiness`,
+  /** Sales channels and what's published to them (phase 6). */
+  publications: (shop: string) => `shop:${shop}:publications`,
   /**
    * Lets inventory_levels/update (which only carries an inventory item id)
    * find the product entries that depend on that item, with no API call.

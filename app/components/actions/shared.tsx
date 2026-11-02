@@ -122,6 +122,55 @@ export function CharCounter({ length, max }: { length: number; max: number }) {
   return <s-text tone={tone}>{text}</s-text>;
 }
 
+/** "Step 1 of 2" marker plus what this step is for. */
+export function StepHeader({
+  step,
+  of,
+  title,
+  detail,
+}: {
+  step: number;
+  of: number;
+  title: string;
+  detail?: string;
+}) {
+  return (
+    <s-stack gap="small-300">
+      <s-stack direction="inline" gap="small-200" alignItems="center">
+        <s-badge tone="info">{`Step ${step} of ${of}`}</s-badge>
+        <s-text type="strong">{title}</s-text>
+      </s-stack>
+      {detail && <s-text color="subdued">{detail}</s-text>}
+    </s-stack>
+  );
+}
+
+/** The extra "I understand" confirmation, set apart from the form. */
+export function Acknowledgement({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <s-box
+      padding="base"
+      borderWidth="base"
+      borderRadius="base"
+      background="subdued"
+    >
+      <s-checkbox
+        label={label}
+        checked={checked}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+      />
+    </s-box>
+  );
+}
+
 export function Warnings({ warnings }: { warnings: readonly string[] }) {
   if (warnings.length === 0) return null;
   return (

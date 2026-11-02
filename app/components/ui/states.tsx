@@ -70,37 +70,134 @@ export function TableSkeleton({ rows = 6 }: { rows?: number }) {
   );
 }
 
-/** Mirrors the common page layout (metric row, then a table card). */
-export function PageSkeleton() {
+export type SkeletonVariant = "dashboard" | "table" | "detail" | "readiness";
+
+function SkeletonCard({
+  children,
+  height,
+}: {
+  children?: ReactNode;
+  height?: `${number}px`;
+}) {
+  return (
+    <s-box
+      padding="base"
+      borderWidth="base"
+      borderRadius="base"
+      background="base"
+      minBlockSize={height}
+    >
+      <s-stack gap="small-200">
+        <SkeletonLine width="40%" height="16px" />
+        {children}
+      </s-stack>
+    </s-box>
+  );
+}
+
+function SkeletonGrid({
+  columns,
+  children,
+}: {
+  columns: string;
+  children: ReactNode;
+}) {
+  return (
+    <s-query-container>
+      <s-grid
+        gap="base"
+        gridTemplateColumns={`@container (inline-size > 720px) ${columns}, minmax(0, 1fr)`}
+      >
+        {children}
+      </s-grid>
+    </s-query-container>
+  );
+}
+
+const METRIC_ROW = (
+  <SkeletonGrid columns="repeat(4, minmax(0, 1fr))">
+    {[0, 1, 2, 3].map((i) => (
+      <SkeletonCard key={i} height="120px">
+        <SkeletonLine width="50%" height="28px" />
+      </SkeletonCard>
+    ))}
+  </SkeletonGrid>
+);
+
+/** Placeholder shaped like the page being opened (no layout jump). */
+export function PageSkeleton({
+  variant = "table",
+}: {
+  variant?: SkeletonVariant;
+}) {
   return (
     <s-box
       accessibilityRole="status"
       accessibilityLabel="Loading page"
       padding="base"
     >
-      <s-stack gap="large">
+      <s-stack gap="base">
         <SkeletonLine width="30%" height="24px" />
-        <s-grid gap="base" gridTemplateColumns="repeat(4, minmax(0, 1fr))">
-          {[0, 1, 2, 3].map((i) => (
-            <s-box
-              key={i}
-              padding="base"
-              borderWidth="base"
-              borderRadius="base"
-            >
-              <s-stack gap="small-200">
-                <SkeletonLine width="60%" />
-                <SkeletonLine width="40%" height="24px" />
-              </s-stack>
-            </s-box>
-          ))}
-        </s-grid>
-        <s-box padding="base" borderWidth="base" borderRadius="base">
-          <TableSkeleton />
-        </s-box>
+        {variant === "dashboard" && (
+          <>
+            {METRIC_ROW}
+            <SkeletonGrid columns="minmax(0, 1fr) minmax(0, 2fr)">
+              <SkeletonCard height="260px" />
+              <SkeletonCard height="260px" />
+            </SkeletonGrid>
+            <SkeletonGrid columns="minmax(0, 1fr) minmax(0, 1fr)">
+              <SkeletonCard height="260px" />
+              <SkeletonCard height="260px" />
+            </SkeletonGrid>
+          </>
+        )}
+        {variant === "table" && (
+          <>
+            {METRIC_ROW}
+            <SkeletonCard height="220px" />
+            <SkeletonCard>
+              <TableSkeleton />
+            </SkeletonCard>
+          </>
+        )}
+        {variant === "detail" && (
+          <SkeletonGrid columns="minmax(0, 2fr) minmax(0, 1fr)">
+            <s-stack gap="base">
+              {[0, 1, 2].map((i) => (
+                <SkeletonCard key={i} height="180px">
+                  <SkeletonLine />
+                  <SkeletonLine width="80%" />
+                </SkeletonCard>
+              ))}
+            </s-stack>
+            <SkeletonCard height="320px" />
+          </SkeletonGrid>
+        )}
+        {variant === "readiness" && (
+          <>
+            <SkeletonGrid columns="minmax(0, 1fr) minmax(0, 2fr)">
+              <SkeletonCard height="240px" />
+              <SkeletonCard height="240px" />
+            </SkeletonGrid>
+            {[0, 1].map((i) => (
+              <SkeletonCard key={i} height="180px">
+                <SkeletonLine />
+                <SkeletonLine width="70%" />
+              </SkeletonCard>
+            ))}
+          </>
+        )}
       </s-stack>
     </s-box>
   );
+}
+
+/** Which skeleton matches a target app path. */
+export function skeletonFor(pathname: string): SkeletonVariant {
+  if (pathname === "/app" || pathname === "/app/") return "dashboard";
+  if (pathname.startsWith("/app/readiness")) return "readiness";
+  if (/^\/app\/products\/[^/]+/.test(pathname)) return "detail";
+  return "table";
 }
 
 /** Friendly error with a retry that re-runs the page loader. */

@@ -12,6 +12,8 @@ export {
 export { aggregateStoreHealth, topIssues } from "./aggregate";
 export type { IssueCount, StoreHealth } from "./aggregate";
 export { summarizeGroups } from "./summary";
+export { SCORE_BUCKETS, bucketScores } from "./distribution";
+export type { ScoreBucket } from "./distribution";
 export type { GroupSummary } from "./summary";
 
 export type ScoreTone = "success" | "warning" | "critical";

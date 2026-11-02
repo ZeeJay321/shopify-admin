@@ -1,4 +1,4 @@
-/** Check rows and ranked issue lists. Icons always come with text. */
+/** Check rows. Icons always come with text. */
 
 import type { ReactNode } from "react";
 import type { CheckStatus } from "../../lib/product-health/types";
@@ -81,37 +81,6 @@ export function CheckRow({
       )}
       {action && <s-stack direction="inline">{action}</s-stack>}
       {children}
-    </s-stack>
-  );
-}
-
-/** Ranked list: "1. Label  [12]" with optional links. */
-export function IssueList({
-  items,
-}: {
-  items: Array<{ key: string; label: string; count: number; href?: string }>;
-}) {
-  return (
-    <s-stack gap="small-200">
-      {items.map((item, i) => (
-        <s-stack
-          key={item.key}
-          direction="inline"
-          gap="small-200"
-          alignItems="center"
-          justifyContent="space-between"
-        >
-          <s-stack direction="inline" gap="small-200" alignItems="center">
-            <s-text color="subdued">{`${i + 1}.`}</s-text>
-            {item.href ? (
-              <s-link href={item.href}>{item.label}</s-link>
-            ) : (
-              <s-text>{item.label}</s-text>
-            )}
-          </s-stack>
-          <s-badge>{`${item.count.toLocaleString("en-US")} product${item.count === 1 ? "" : "s"}`}</s-badge>
-        </s-stack>
-      ))}
     </s-stack>
   );
 }

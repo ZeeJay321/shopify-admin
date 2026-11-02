@@ -1,0 +1,279 @@
+/*
+ * Chart and card styling. Every color resolves to a Polaris token first;
+ * the --zj-fb-* fallbacks below are the ONLY literal colors in the app and
+ * apply only when the Polaris tokens aren't exposed to the iframe. They are
+ * a CVD-checked status palette.
+ */
+
+:root {
+  --zj-fb-success: #0ca30c;
+  --zj-fb-warning: #fab219;
+  --zj-fb-critical: #d03b3b;
+  --zj-fb-caution: #ec835a;
+  --zj-fb-info: #2a78d6;
+  --zj-fb-neutral: #898781;
+  --zj-fb-surface: #fcfcfb;
+  --zj-fb-text: #0b0b0b;
+  --zj-fb-text-secondary: #52514e;
+  --zj-fb-grid: #e1e0d9;
+  --zj-fb-axis: #c3c2b7;
+  --zj-fb-track: #ebeae6;
+  --zj-fb-inverse: #1a1a19;
+  --zj-fb-text-inverse: #f0efec;
+}
+
+/*
+ * No separate dark block: Polaris web components keep light surfaces under
+ * both an OS dark preference and data-theme="dark" (checked in headless
+ * Chrome), so a dark override here would put light ink on light cards. The
+ * status steps pass contrast on light and dark surfaces, and when Admin
+ * exposes its --p-color-* tokens (including any dark theme) they win.
+ */
+
+/* Resolved chart tokens: Polaris first, fallback second. */
+:root {
+  --zj-c-success: var(--p-color-bg-fill-success, var(--zj-fb-success));
+  --zj-c-warning: var(--p-color-bg-fill-warning, var(--zj-fb-warning));
+  --zj-c-critical: var(--p-color-bg-fill-critical, var(--zj-fb-critical));
+  --zj-c-caution: var(--p-color-bg-fill-caution, var(--zj-fb-caution));
+  --zj-c-info: var(--p-color-bg-fill-emphasis, var(--zj-fb-info));
+  --zj-c-neutral: var(--p-color-icon-secondary, var(--zj-fb-neutral));
+  --zj-c-surface: var(--p-color-bg-surface, var(--zj-fb-surface));
+  --zj-c-text: var(--p-color-text, var(--zj-fb-text));
+  --zj-c-text-secondary: var(
+    --p-color-text-secondary,
+    var(--zj-fb-text-secondary)
+  );
+  --zj-c-grid: var(--p-color-border-secondary, var(--zj-fb-grid));
+  --zj-c-axis: var(--p-color-border, var(--zj-fb-axis));
+  --zj-c-track: var(--p-color-bg-fill-secondary, var(--zj-fb-track));
+  --zj-c-inverse: var(--p-color-bg-inverse, var(--zj-fb-inverse));
+  --zj-c-text-inverse: var(--p-color-text-inverse, var(--zj-fb-text-inverse));
+}
+
+/* --- Figures ------------------------------------------------------------ */
+
+.zj-figure {
+  display: block;
+  color: var(--zj-c-text);
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.zj-accent {
+  inline-size: 2rem;
+  block-size: 3px;
+  border-radius: 2px;
+}
+
+/* --- Chart shell -------------------------------------------------------- */
+
+.zj-chart {
+  position: relative;
+  inline-size: 100%;
+  min-inline-size: 0;
+  border-radius: 8px;
+}
+
+.zj-chart:focus-visible {
+  outline: 2px solid var(--zj-c-info);
+  outline-offset: 4px;
+}
+
+.zj-chart svg {
+  display: block;
+  inline-size: 100%;
+  overflow: visible;
+}
+
+.zj-chart text {
+  font-family: inherit;
+  fill: var(--zj-c-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zj-chart .zj-text-strong {
+  fill: var(--zj-c-text);
+  font-weight: 650;
+}
+
+.zj-tooltip {
+  position: absolute;
+  z-index: 1;
+  transform: translate(-50%, calc(-100% - 8px));
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--zj-c-inverse);
+  color: var(--zj-c-text-inverse);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* --- Legend ------------------------------------------------------------- */
+
+.zj-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zj-legend--column {
+  flex-direction: column;
+}
+
+.zj-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.zj-swatch {
+  flex: none;
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 3px;
+}
+
+/* --- Bars (HTML) -------------------------------------------------------- */
+
+.zj-track {
+  position: relative;
+  overflow: hidden;
+  block-size: 8px;
+  border-radius: 4px;
+  background: var(--zj-c-track);
+}
+
+.zj-track--thin {
+  block-size: 6px;
+}
+
+.zj-fill {
+  block-size: 100%;
+  border-radius: 4px;
+}
+
+.zj-stack {
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  block-size: 12px;
+  border-radius: 6px;
+  background: var(--zj-c-track);
+}
+
+.zj-stack--thin {
+  block-size: 6px;
+  border-radius: 3px;
+}
+
+.zj-stack > span {
+  block-size: 100%;
+  min-inline-size: 2px;
+}
+
+.zj-hbar {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zj-hbar li {
+  display: grid;
+  gap: 4px;
+}
+
+.zj-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.zj-row > :first-child {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.zj-row > :last-child {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.zj-inline-score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zj-inline-score .zj-track {
+  inline-size: 64px;
+  flex: none;
+}
+
+.zj-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Data table --------------------------------------------------------- */
+
+.zj-details summary {
+  cursor: pointer;
+  inline-size: fit-content;
+}
+
+.zj-data-table {
+  inline-size: 100%;
+  margin-block-start: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--zj-c-text);
+}
+
+.zj-data-table th,
+.zj-data-table td {
+  padding: 4px 8px;
+  border-block-end: 1px solid var(--zj-c-grid);
+  text-align: start;
+}
+
+.zj-data-table td:last-child,
+.zj-data-table th:last-child {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.zj-visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .zj-fill,
+  .zj-stack > span,
+  .zj-swatch,
+  .zj-accent {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
+}
+
+.zj-data-table tbody th {
+  font-weight: 400;
+}

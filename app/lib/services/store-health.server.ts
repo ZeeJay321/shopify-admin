@@ -10,6 +10,7 @@ import type { IssueCount } from "../product-health";
 import {
   GROUPS,
   aggregateStoreHealth,
+  bucketScores,
   scoreProduct,
   summarizeGroups,
   topIssues,
@@ -32,6 +33,8 @@ export type StoreHealthSample = {
     earned: number;
     weight: number;
   }>;
+  /** Product count per SCORE_BUCKETS band (for the distribution chart). */
+  scoreBuckets: number[];
 };
 
 export async function loadStoreHealth(
@@ -83,5 +86,6 @@ async function loadSample(
     productsWithIssues: health.productsWithIssues,
     topIssues: topIssues(health, 5),
     groupAverages,
+    scoreBuckets: bucketScores(results.map((r) => r.score)),
   };
 }

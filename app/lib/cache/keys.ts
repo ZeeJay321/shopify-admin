@@ -9,14 +9,18 @@
  * | inventory-summary      | inventory, products                      |
  * | product-health:{id}    | product:{id}, inventory-item:{itemId}... |
  * | orders-summary         | orders, inventory                        |
- * | storefront-readiness   | readiness                                |
+ * | storefront-readiness:* | readiness, publications                  |
+ * | sales-channels         | publications                             |
  */
 
 import type { HealthSummaryResponse } from "../product-health-api/contract";
 import type { StoreHealthSample } from "../services/store-health.server";
 import type { InventoryRiskSummary } from "../services/inventory-risk.server";
 import type { OrdersSummary } from "../services/orders.server";
-import type { ReadinessReport } from "../storefront-readiness/types";
+import type {
+  ReadinessReport,
+  SalesChannel,
+} from "../storefront-readiness/types";
 import type { StoreCounts } from "../shopify/products.server";
 import { cacheKey, cacheTags } from "./types";
 
@@ -32,7 +36,10 @@ export type CachedProductHealth = {
   inventoryItemIds: string[];
 };
 export const ordersSummaryKey = cacheKey<OrdersSummary>("orders-summary");
-export const readinessKey = cacheKey<ReadinessReport>("storefront-readiness");
+/** One readiness report per checked sales channel ("default" = Online Store URL). */
+export const readinessKey = (channel = "default") =>
+  cacheKey<ReadinessReport>(`storefront-readiness:${channel}`);
+export const salesChannelsKey = cacheKey<SalesChannel[]>("sales-channels");
 export const productHealthKey = (productId: string) =>
   cacheKey<CachedProductHealth>(`product-health:${productId}`);
 
@@ -51,7 +58,11 @@ export const keyTags = {
     cacheTags.orders(shop),
     cacheTags.inventory(shop),
   ],
-  readiness: (shop: string) => [cacheTags.readiness(shop)],
+  readiness: (shop: string) => [
+    cacheTags.readiness(shop),
+    cacheTags.publications(shop),
+  ],
+  salesChannels: (shop: string) => [cacheTags.publications(shop)],
   productHealth: (
     shop: string,
     productId: string,

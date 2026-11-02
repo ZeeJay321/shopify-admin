@@ -14,6 +14,7 @@ import type {
   InventoryLevelAvailableQuery,
   InventoryLocationsQuery,
   InventoryVariantsQuery,
+  VariantsMatchingCountQuery,
 } from "../../types/admin.generated";
 import type { AdminGraphqlClient } from "./client";
 import { runQuery } from "./client";
@@ -72,6 +73,8 @@ const INVENTORY_VARIANTS = `#graphql
     $before: String
     $query: String
     $levelsFirst: Int!
+    $sortKey: ProductVariantSortKeys = INVENTORY_QUANTITY
+    $reverse: Boolean = false
   ) {
     productVariants(
       first: $first
@@ -79,7 +82,8 @@ const INVENTORY_VARIANTS = `#graphql
       last: $last
       before: $before
       query: $query
-      sortKey: INVENTORY_QUANTITY
+      sortKey: $sortKey
+      reverse: $reverse
     ) {
       nodes {
         id
@@ -106,8 +110,36 @@ export type InventoryPageRequest = {
   direction?: "next" | "prev";
   /** Numeric location id; restricts to variants stocked there. */
   locationId?: string | null;
+  /** Extra Shopify search (e.g. from `variantSearch`). */
+  search?: string | null;
+  sort?: { key: VariantSortKey; reverse: boolean };
   pageSize?: number;
 };
+
+export type VariantSortKey = "INVENTORY_QUANTITY" | "TITLE";
+
+const VARIANTS_MATCHING_COUNT = `#graphql
+  query VariantsMatchingCount($query: String) {
+    productVariantsCount(query: $query, limit: null) { count precision }
+  }
+`;
+
+/** Count for "Showing 21-40 of N" (same query as the table). */
+export async function getVariantsCount(
+  client: AdminGraphqlClient,
+  query: string,
+): Promise<{ count: number; atLeast: boolean }> {
+  const data = await runQuery<VariantsMatchingCountQuery>(
+    client,
+    "Variant count",
+    VARIANTS_MATCHING_COUNT,
+    { query },
+  );
+  return {
+    count: data.productVariantsCount?.count ?? 0,
+    atLeast: data.productVariantsCount?.precision === "AT_LEAST",
+  };
+}
 
 export type InventoryPage = {
   variants: VariantInventory[];
@@ -120,9 +152,13 @@ export type InventoryPage = {
 };
 
 /** Archived products are excluded: they can't sell, so they aren't a risk. */
-export function inventorySearchQuery(locationId?: string | null): string {
+export function inventorySearchQuery(
+  locationId?: string | null,
+  search?: string | null,
+): string {
   const base = "product_status:active,draft";
-  return locationId ? `${base} location_id:${locationId}` : base;
+  const scoped = locationId ? `${base} location_id:${locationId}` : base;
+  return search ? `${scoped} AND (${search})` : scoped;
 }
 
 export async function getInventoryPage(
@@ -131,6 +167,8 @@ export async function getInventoryPage(
     cursor = null,
     direction = "next",
     locationId = null,
+    search = null,
+    sort = { key: "INVENTORY_QUANTITY", reverse: false },
     pageSize = INVENTORY_PAGE_SIZE,
   }: InventoryPageRequest = {},
 ): Promise<InventoryPage> {
@@ -145,8 +183,10 @@ export async function getInventoryPage(
     INVENTORY_VARIANTS,
     {
       ...paging,
-      query: inventorySearchQuery(locationId),
+      query: inventorySearchQuery(locationId, search),
       levelsFirst: INVENTORY_LEVELS_LIMIT,
+      sortKey: sort.key,
+      reverse: sort.reverse,
     },
   );
 

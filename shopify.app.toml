@@ -13,10 +13,14 @@ embedded = true
 # protected customer data (level 1): configure access in the Partner Dashboard.
 # write_products: confirmed SEO and status changes (productUpdate).
 # write_inventory: confirmed stock adjustments (inventoryAdjustQuantities).
+# read_publications: list sales channels, check what's published to them and
+# receive product_publications/* webhooks (phase 6 Publishing check).
+# write_publications: confirmed "Publish to <channel>" fixes
+# (publishablePublish). Existing installs must re-approve.
 # Never add read_all_orders, customer scopes or other write scopes without a
 # reviewed need.
 # See README "Scopes" before adding anything here.
-scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders"
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_publications,write_publications"
 
 [webhooks]
 api_version = "2026-07"
@@ -40,6 +44,12 @@ api_version = "2026-07"
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/catalog"
   topics = [ "orders/create", "orders/updated" ]
+
+  # Sales channel publishing changes: invalidate readiness (phase 6).
+  # Requires read_publications.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/catalog"
+  topics = [ "product_publications/create", "product_publications/update", "product_publications/delete" ]
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]

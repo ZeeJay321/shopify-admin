@@ -77,6 +77,9 @@ export const RECENT_ORDER_DAYS = 7;
 /** Orders per page on the Order Operations table. */
 export const ORDERS_PAGE_SIZE = 25;
 
+/** Days shown on the orders-per-day charts (within the recent sample). */
+export const ORDERS_CHART_DAYS = 14;
+
 /** Max recent orders scanned for the summary cards. */
 export const ORDERS_SAMPLE_CAP = 250;
 
@@ -107,3 +110,23 @@ export const SEO_BATCH_MAX = 10;
 
 /** Prefix for this app's inventory reference document URIs. */
 export const APP_REFERENCE_GID_PREFIX = "gid://zj-commerce-ops";
+
+// --- Tables, bulk fixes and sales channels (phase 6) ---------------------------
+
+/** Page sizes offered by every table; the first is the default. */
+export const TABLE_PAGE_SIZES = [20, 50, 100] as const;
+
+/** Max items in one bulk fix (publish, activate). SEO keeps SEO_BATCH_MAX. */
+export const BULK_ACTION_MAX = 25;
+
+/** Max sales channels (publications) listed in the channel selector. */
+export const PUBLICATIONS_CAP = 50;
+
+/** Product title limit enforced by the Edit dialog (Shopify allows 255). */
+export const MAX_PRODUCT_TITLE_LENGTH = 255;
+
+/** Plain-text description limit for the Edit dialog. */
+export const MAX_DESCRIPTION_TEXT_LENGTH = 5_000;
+
+/** Longest search term accepted from the URL. */
+export const MAX_SEARCH_LENGTH = 100;

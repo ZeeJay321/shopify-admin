@@ -21,3 +21,16 @@ export function scoreBand(score: number): "good" | "needs work" | "poor" {
       ? "needs work"
       : "poor";
 }
+
+const VERDICTS = {
+  good: "Good",
+  "needs work": "Needs work",
+  poor: "Poor",
+} as const;
+
+/** Display verdict for a 0-100 score: "Good", "Needs work" or "Poor". */
+export function scoreVerdict(
+  score: number,
+): (typeof VERDICTS)[keyof typeof VERDICTS] {
+  return VERDICTS[scoreBand(score)];
+}

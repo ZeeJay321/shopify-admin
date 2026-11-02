@@ -7,19 +7,29 @@
 
 import type { TaggedCache } from "../cache/types";
 import { keyTags, ordersSummaryKey } from "../cache/keys";
-import { HIGH_VALUE_ORDER_THRESHOLD, RECENT_ORDER_DAYS } from "../config";
+import {
+  HIGH_VALUE_ORDER_THRESHOLD,
+  ORDERS_CHART_DAYS,
+  RECENT_ORDER_DAYS,
+} from "../config";
 import type {
+  DayCount,
   LowStockLookup,
   OrderAssessment,
   OrdersAggregate,
   OrderSnapshot,
 } from "../order-ops";
-import { aggregateOrders, classifyOrder } from "../order-ops";
+import { aggregateOrders, classifyOrder, ordersPerDay } from "../order-ops";
 import { daysAgoIso } from "../order-ops/dates";
 import type { OrderFilter } from "../order-ops/filters";
 import type { AdminGraphqlClient } from "../shopify/client";
 import { isShopifyApiError } from "../shopify/errors";
-import type { OrderCounts, OrdersPage } from "../shopify/orders.server";
+import type {
+  OrderCounts,
+  OrdersPage,
+  OrdersPageRequest,
+} from "../shopify/orders.server";
+import { joinQuery } from "../shopify/search";
 import {
   UNFULFILLED_SEARCH,
   getOrderCounts,
@@ -36,6 +46,12 @@ export type OrdersSummary = {
   capped: boolean;
   aggregate: OrdersAggregate;
   inventoryCrossCheck: InventoryCrossCheck;
+  /** Shop IANA timezone ("UTC" when unknown). */
+  timeZone: string;
+  /** Sampled orders per shop day, oldest first, covered days only. */
+  perDay: DayCount[];
+  /** Sampled orders by Shopify display fulfillment status. */
+  fulfillmentMix: Record<string, number>;
 };
 
 /** Server-side search for a filter; needs_attention is computed by the app. */
@@ -91,11 +107,13 @@ export async function loadOrdersSummary(
     ordersSummaryKey,
     { tags: keyTags.ordersSummary(shop) },
     async () => {
+      const meta: { timeZone?: string } = {};
       const [{ lookup, crossCheck }, counts, sample] = await Promise.all([
         loadLowStockLookup(client, shop, cache),
-        getOrderCounts(client, now),
+        getOrderCounts(client, now, meta),
         getRecentOrdersSample(client),
       ]);
+      const timeZone = meta.timeZone ?? "UTC";
       const assessments = sample.orders.map((o) =>
         classifyOrder(o, { now, lowStock: lookup }),
       );
@@ -105,9 +123,32 @@ export async function loadOrdersSummary(
         capped: sample.capped,
         aggregate: aggregateOrders(assessments),
         inventoryCrossCheck: crossCheck,
+        timeZone,
+        perDay: ordersPerDay(
+          sample.orders.map((o) => o.createdAt),
+          {
+            now,
+            timeZone,
+            days: ORDERS_CHART_DAYS,
+            // Newest first: a capped sample only covers back to its last order.
+            coveredFrom: sample.capped
+              ? (sample.orders.at(-1)?.createdAt ?? null)
+              : null,
+          },
+        ),
+        fulfillmentMix: countBy(sample.orders, (o) => o.fulfillmentStatus),
       };
     },
   );
+}
+
+function countBy<T>(
+  items: readonly T[],
+  key: (item: T) => string,
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const item of items) result[key(item)] = (result[key(item)] ?? 0) + 1;
+  return result;
 }
 
 export type OrderRow = { order: OrderSnapshot; assessment: OrderAssessment };
@@ -121,11 +162,18 @@ export async function loadOrdersPage(
     direction = "next",
     filter = null,
     now = new Date(),
+    search = null,
+    sort,
+    pageSize,
   }: {
     cursor?: string | null;
     direction?: "next" | "prev";
     filter?: OrderFilter | null;
     now?: Date;
+    /** Order-name search (from `orderNameSearch`). */
+    search?: string | null;
+    sort?: OrdersPageRequest["sort"];
+    pageSize?: number;
   },
 ): Promise<{
   rows: OrderRow[];
@@ -138,7 +186,9 @@ export async function loadOrdersPage(
     getOrdersPage(client, {
       cursor,
       direction,
-      search: searchForFilter(filter, now),
+      search: joinQuery(searchForFilter(filter, now), search),
+      sort,
+      pageSize,
     }),
   ]);
   const rows = page.orders.map((order) => ({

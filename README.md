@@ -24,6 +24,7 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 - [Cache](#cache)
 - [Admin UI extensions](#admin-ui-extensions)
 - [Write actions](#write-actions) and [Threat model](#threat-model-for-writes)
+- [Phase 6: tables, inline fixes, sales channels](#phase-6-tables-inline-fixes-sales-channels)
 - [Security notes](#security-notes)
 - [Local development](#local-development) and [Testing on a development store](#testing-on-a-development-store)
 - [Limitations](#limitations)
@@ -47,6 +48,9 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 | 5 | **Fix SEO** and **Publish / Move to draft** with a preview and confirmation | `/app/products/:id` |
 | 5 | **Adjust stock** per variant and location, with Shopify compare-and-set | `/app/inventory` |
 | 5 | **Apply suggested SEO** to up to 10 products missing SEO | `/app/readiness` |
+| 6 | **Data tables everywhere:** search, sort, page size (20/50/100), "Showing 21–40 of 172", row selection, row action menus | all list pages |
+| 6 | **Inline fixes from tables:** Publish to a sales channel, Activate, Edit title/description, Apply suggested SEO; bulk up to 25 with per-item results | `/app/products`, `/app/readiness` |
+| 6 | **Sales channel selector** for the Publishing check, with a smart default for headless stores | `/app/readiness` |
 
 ## Architecture
 
@@ -93,12 +97,13 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 | `read_orders` | `orders` and `ordersCount` (**last 60 days only**); the `orders/create` and `orders/updated` webhooks | 4 |
 | `write_products` | `productUpdate`, only for the confirmed **SEO** and **status** actions | 5 |
 | `write_inventory` | `inventoryAdjustQuantities`, only for the confirmed **Adjust stock** action | 5 |
+| `read_publications` | `publications` (sales channels, `catalog.title`, `includedProductsCount`), `Product.publishedOnPublication`; the `product_publications/*` webhooks | 6 |
+| `write_publications` | `publishablePublish`, only for the confirmed **Publish to [channel]** fix | 6 |
 
 **Scopes this app doesn't request:**
 - `read_all_orders`: older orders would need Shopify's approval.
 - Customer scopes.
-- `read_publications`: the Online Store check uses `onlineStoreUrl`. Checking a Headless channel would need `read_publications` and is a possible follow-up.
-- Any other `write_*` scope (no orders, customers, discounts, publications or price writes).
+- Any other `write_*` scope (no orders, customers, discounts or price writes). Publishing is the only publication write, and there's no unpublish.
 
 **Protected customer data:** Shopify treats orders as protected customer data even when no personal fields are read (Level 1). The app must have **protected customer data access** configured in the Partner Dashboard: Apps → ZJ Commerce Operations → **API access requests** → Protected customer data access → Request access → select the order data use (no name, email, phone or address fields).
 - Apps installed only on development stores don't need Shopify's review, but the access must still be configured.
@@ -112,13 +117,14 @@ An embedded Shopify Admin app that gives merchants an **operations layer** on to
 
 ## Webhooks
 
-All declared in `shopify.app.toml` (API 2026-07). The six catalog and order topics go to **one dispatcher**, [`webhooks.app.catalog.tsx`](app/routes/webhooks.app.catalog.tsx), which uses a **handler registry** ([`handlers.ts`](app/lib/webhooks/handlers.ts)).
+All declared in `shopify.app.toml` (API 2026-07). The nine catalog, order and publication topics go to **one dispatcher**, [`webhooks.app.catalog.tsx`](app/routes/webhooks.app.catalog.tsx), which uses a **handler registry** ([`handlers.ts`](app/lib/webhooks/handlers.ts)).
 
 | Topic | Why | Effect (cache tags invalidated) |
 |---|---|---|
 | `products/create`, `products/update`, `products/delete` | Catalog changed | `products`, `inventory`, `readiness`, `product:{id}`. Pings the storefront if configured. |
 | `inventory_levels/update` | Stock changed at a location | `inventory`, `readiness`, `inventory-item:{id}` (that product's summary). Falls back to `products` if the item id is missing. |
 | `orders/create`, `orders/updated` | Orders changed | `orders`. The payload (protected customer data) is never read. |
+| `product_publications/create`, `/update`, `/delete` | A product was (un)published on a sales channel (needs `read_publications`) | `readiness`, `publications`, `product:{id}` |
 | `app/uninstalled`, `app/scopes_update` | Template session housekeeping | Delete sessions, update the stored scope |
 
 - **No collection webhooks.** Collection-only changes, such as a new or emptied collection, reach Storefront Readiness via the 10-minute TTL or the **Recheck now** button. Product membership changes usually also fire `products/update`.
@@ -268,7 +274,10 @@ There are three actions, plus a capped batch. All of them are POST-only React Ro
 | **Fix SEO** (title ≤ 70, description ≤ 160) | Product Health detail | `productUpdate(product: { id, seo })` | `write_products` |
 | **Publish / Move to draft** (DRAFT ↔ ACTIVE only) | Product Health detail | `productUpdate(product: { id, status })`. `productChangeStatus` is deprecated in 2026-07. | `write_products` |
 | **Adjust stock** (available, per location) | Inventory Risk | `inventoryAdjustQuantities` with `@idempotent(key:)` | `write_inventory` |
-| **Apply suggested SEO** (up to `SEO_BATCH_MAX` = 10 products) | Storefront Readiness → SEO | `productUpdate`, one product at a time | `write_products` |
+| **Apply suggested SEO** (up to `SEO_BATCH_MAX` = 10 products) | Storefront Readiness → SEO, Product Health list | `productUpdate`, one product at a time | `write_products` |
+| **Publish to [channel]** (up to `BULK_ACTION_MAX` = 25) | Storefront Readiness → Publishing | `publishablePublish(id, input: [{ publicationId }])`, one product at a time | `write_publications` |
+| **Activate** drafts with no critical issues (up to 25) | Product Health list | `productUpdate(product: { id, status: ACTIVE })` | `write_products` |
+| **Edit title and description** | Product Health list and detail, Storefront Readiness | `productUpdate(product: { id, title?, descriptionHtml? })` | `write_products` |
 
 ### Safeguards
 
@@ -315,6 +324,57 @@ There are three actions, plus a capped batch. All of them are POST-only React Ro
 | **Lost updates** | Compare-and-set for stock, and a stale-value check for SEO and status. |
 | **Accidental or harmful edits** | Narrow scopes, no deletes or prices, per-action limits, extra acknowledgements, and preview before confirm. |
 | **Data leakage** | Logs record only `intent`, `shop`, resource id and outcome. No request bodies, tokens or raw Shopify errors reach logs or the UI. |
+
+## Phase 6: tables, inline fixes, sales channels
+
+### Tables and pagination
+
+One typed, presentational [`DataTable`](app/components/tables/DataTable.tsx) wraps `s-table` for every list:
+- Sortable headers (as buttons; `s-table` has no built-in sort), row selection with "select all on this page" and a selection bar, a row action menu (`s-menu`), page size 20 / 50 / 100, and "Showing 21–40 of 172".
+- Search, filters, sort, page size and position live in the URL, so pages are linkable and survive reload. Changing anything but the position returns to page 1.
+- Pure helpers with tests: [`app/lib/tables/`](app/lib/tables/) (paging math, URL params, sorting, selection) and [`app/lib/shopify/search.ts`](app/lib/shopify/search.ts) (search terms are reduced to letters, digits and dashes, so input can't inject search operators).
+
+| List | Pagination | Search | Sort | Position total |
+|---|---|---|---|---|
+| Product Health | Shopify cursor | product title | title | `productsCount(query)` |
+| Inventory Risk | Shopify cursor | product/variant title, SKU | available, title | `productVariantsCount(query)` |
+| Order Operations | Shopify cursor | order name | created, total | `ordersCount(query)` (not for "Needs attention", which the app computes) |
+| Readiness affected items | Over the **full** cached affected set (no 20-item cap); only the current page is sent | title | title, status, vendor, score | exact |
+
+### Inline fixes
+
+| Problem | Fix | Notes |
+|---|---|---|
+| Missing SEO title or description | **Apply suggested SEO** | Existing deterministic suggestions and validation; batch of 10 |
+| Not published to the selected channel | **Publish to [channel]** | Server re-reads the channel and `publishedOnPublication` first; already published counts as success |
+| Draft with no critical issues | **Activate** | Drafts with critical issues are skipped in bulk and need the single-product dialog with its acknowledgement |
+| Missing or placeholder title, short description | **Edit** | Title ≤ 255, not a placeholder; plain-text description ≤ 5,000, escaped and turned into `<p>` paragraphs. Only changed fields are sent, so an untouched description keeps its formatting. Stale check against the values the dialog showed. |
+| Low stock | **Adjust stock** | The existing dialog on Inventory Risk; other pages link there |
+| Zero price, missing images | **Open in Shopify Admin** | No direct fix: images need uploading, and price changes are too risky for this tool |
+
+Bulk fixes: up to `BULK_ACTION_MAX` = 25 per submit (SEO stays at 10), a summary dialog ("This will publish 25 products to Headless Storefront"), explicit confirmation, then items run **one at a time** ([`bulk.server.ts`](app/lib/services/actions/bulk.server.ts)). If Shopify keeps throttling or permission is missing, the rest are marked "Not attempted". Successes are never rolled back, and the dialog shows a per-item result table. No bulk deletes, price changes or stock changes.
+
+All fixes use the phase 5 pipeline: POST only, session shop, scope check, `confirm=yes`, server re-validation, stale checks, typed userErrors, and cache invalidation only after success. Loaders revalidate after each fix, so tables update without a reload.
+
+### Why "Published to the Online Store" misled headless stores
+
+Products imported by CSV are published to Online Store only if the CSV says so, while a headless storefront reads from its **own** sales channel. The old check read `onlineStoreUrl`, so a headless store with every product live on its channel showed every product as failing.
+
+The Publishing check now takes a **sales channel** ([`channel.ts`](app/lib/storefront-readiness/channel.ts), pure and tested):
+1. The channel in the URL (`?channel=`), if it exists.
+2. Else Online Store, if it has products.
+3. Else the other channel with the most products (ties by name, then id).
+4. Else Online Store.
+
+When Online Store is empty but another channel isn't, an info banner explains it and links back to Online Store. The check's name and results use the channel's real name ("Published to Headless Storefront").
+
+Checks receive configuration through `evaluate(snapshot, config)` and an optional `describe(config)`, so the registry stays pluggable. Reports are cached **per channel**, tagged `readiness` and `publications`, and invalidated by the `product_publications/*` webhooks, by fixes and by **Recheck now**.
+
+Without `read_publications`, Readiness keeps the old Online Store behaviour and shows a banner explaining it may be inaccurate for headless stores.
+
+### Re-approving the new scopes
+
+`read_publications` and `write_publications` are new. After `npm run dev` or `shopify app deploy`, open the app from Shopify Admin and approve the updated access; if no prompt appears, reinstall the app on the dev store.
 
 ## Security notes
 
@@ -416,7 +476,11 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
 
   The pages label each of these when capped.
 - **Page-level filters:** "has issues", the risk filter and "needs attention" filter the current page, because the app computes them.
-- **Publishing:** readiness checks the Online Store channel, not a Headless channel, because that would need `read_publications`.
+- **Channel product counts** use `Publication.includedProductsCount`, the only count Shopify exposes per publication. It counts products *included* in the channel (which can include scheduled publishes), so it's a close approximation used for the default-channel choice; the check itself reads `publishedOnPublication` per product.
+- **Product Health's own "Online Store" check** (phase 1 scoring) still uses `onlineStoreUrl`, by design: scoring is unchanged. Storefront Readiness is the channel-aware view.
+- **Table search** uses Shopify's word-prefix matching (`hood` finds "Organic Hoodie", `oodie` doesn't). Order search matches the order name only, never customer fields.
+- **Cursor tables** can't jump to an arbitrary page; Previous/Next only. Readiness tables page freely over the cached result.
+- **No sticky table header:** `s-table` doesn't support one.
 - **Collection-only changes** refresh via the TTL or **Recheck now**, not a webhook.
 - **The high-value threshold** is one number in shop currency; multi-currency stores may want per-currency thresholds.
 - **SEO and status staleness** is check-then-act, because `productUpdate` has no compare-and-set; a change in the milliseconds between the re-read and the write can still be overwritten. Stock changes use Shopify's atomic compare-and-set.
@@ -429,6 +493,7 @@ When both variables are set, product webhooks send a `POST` to the storefront wi
 3. ~~Idempotent webhooks, cache invalidation, Inventory Risk~~ ✅ done
 4. ~~Order Operations, Storefront Readiness, order webhooks~~ ✅ done
 5. ~~Confirmed write actions: Fix SEO, Publish / Move to draft, Adjust stock, and the capped SEO batch~~ ✅ done
+6. ~~Data tables with pagination, inline and bulk fixes, sales-channel-aware Publishing check~~ ✅ done
 
 ## Interview talking points
 

@@ -8,3 +8,5 @@ export {
   REASON_POINTS,
 } from "./classify";
 export { aggregateOrders } from "./aggregate";
+export { ordersPerDay } from "./daily";
+export type { DayCount } from "./daily";

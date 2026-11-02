@@ -12,8 +12,10 @@ import {
 import type {
   ProductHealthDetailQuery,
   ProductHealthListQuery,
+  ProductsMatchingCountQuery,
   StoreProductCountsQuery,
 } from "../../types/admin.generated";
+import { joinQuery } from "./search";
 import type { AdminGraphqlClient } from "./client";
 import { runQuery } from "./client";
 import { ShopifyApiError } from "./errors";
@@ -74,6 +76,8 @@ const PRODUCT_HEALTH_LIST = `#graphql
     $before: String
     $query: String
     $variantsFirst: Int!
+    $sortKey: ProductSortKeys = TITLE
+    $reverse: Boolean = false
   ) {
     products(
       first: $first
@@ -81,7 +85,8 @@ const PRODUCT_HEALTH_LIST = `#graphql
       last: $last
       before: $before
       query: $query
-      sortKey: TITLE
+      sortKey: $sortKey
+      reverse: $reverse
     ) {
       nodes {
         id
@@ -116,8 +121,44 @@ export type ProductsPageRequest = {
   cursor?: string | null;
   direction?: "next" | "prev";
   status?: ProductStatusFilter | null;
+  /** Extra Shopify search (e.g. from `productTitleSearch`). */
+  search?: string | null;
+  sort?: { key: ProductSortKey; reverse: boolean };
   pageSize?: number;
 };
+
+export type ProductSortKey = "TITLE" | "UPDATED_AT";
+
+const PRODUCTS_MATCHING_COUNT = `#graphql
+  query ProductsMatchingCount($query: String) {
+    productsCount(query: $query, limit: null) { count precision }
+  }
+`;
+
+/** Shopify search for the product list (status filter plus search). */
+export function productListQuery(
+  status: ProductStatusFilter | null,
+  search: string | null,
+): string | null {
+  return joinQuery(status ? `status:${status.toLowerCase()}` : null, search);
+}
+
+/** Count for "Showing 21-40 of N" (same query as the list). */
+export async function getProductsCount(
+  client: AdminGraphqlClient,
+  query: string | null,
+): Promise<ProductCount> {
+  const data = await runQuery<ProductsMatchingCountQuery>(
+    client,
+    "Product count",
+    PRODUCTS_MATCHING_COUNT,
+    { query },
+  );
+  return {
+    count: data.productsCount?.count ?? 0,
+    atLeast: data.productsCount?.precision === "AT_LEAST",
+  };
+}
 
 export type ProductsPage = {
   products: ProductRecord[];
@@ -135,6 +176,8 @@ export async function getProductsPage(
     cursor = null,
     direction = "next",
     status = null,
+    search = null,
+    sort = { key: "TITLE", reverse: false },
     pageSize = PRODUCTS_PAGE_SIZE,
   }: ProductsPageRequest = {},
 ): Promise<ProductsPage> {
@@ -149,8 +192,10 @@ export async function getProductsPage(
     PRODUCT_HEALTH_LIST,
     {
       ...paging,
-      query: status ? `status:${status.toLowerCase()}` : null,
+      query: productListQuery(status, search),
       variantsFirst: LIST_VARIANTS_LIMIT,
+      sortKey: sort.key,
+      reverse: sort.reverse,
     },
   );
 

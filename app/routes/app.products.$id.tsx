@@ -6,7 +6,7 @@ import type {
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { GROUPS, scoreProduct } from "../lib/product-health";
+import { GROUPS, scoreProduct, summarizeGroups } from "../lib/product-health";
 import { toLoaderError } from "../lib/shopify/errors";
 import { toNumericId, toProductGid } from "../lib/shopify/gid";
 import { getProduct } from "../lib/shopify/products.server";
@@ -26,16 +26,18 @@ import {
   statusActionLabel,
 } from "../components/actions/product-actions";
 import { WriteAccessBanner } from "../components/actions/shared";
+import { ContentEditDialog } from "../components/actions/content-edit";
+
+const EDIT_MODAL_ID = "content-edit-modal";
 import type { CheckId, HealthCheck } from "../lib/product-health/types";
 import { plural, scoreTone } from "../lib/presentation";
 import {
   CheckRow,
   EmptyState,
   ErrorState,
-  LabeledProgress,
-  ScoreIndicator,
   StatusBadge,
 } from "../components/ui";
+import { HorizontalBarChart, ScoreGauge } from "../components/charts";
 
 /**
  * Product Health detail: issues with manual fix steps, plus confirmed write
@@ -57,6 +59,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         status: record.snapshot.status,
         imageUrl: record.imageUrl,
         imageAlt: record.imageAlt,
+        description: record.snapshot.description,
+        rawTitle: record.snapshot.title,
       },
       seo: {
         title: record.snapshot.seoTitle ?? "",
@@ -116,6 +120,7 @@ export default function ProductHealthDetail() {
   const next = nextStatus(product.status);
   const seoIssues = health.issues.some((i) => i.group === "seo");
   const adminUrl = `shopify://admin/products/${product.id}`;
+  const groups = summarizeGroups(health);
   const failing = health.checks.filter((c) => c.status === "fail").length;
   const warning = health.checks.filter((c) => c.status === "warn").length;
 
@@ -134,6 +139,13 @@ export default function ProductHealthDetail() {
       return (
         <s-button commandFor={STATUS_MODAL_ID} command="--show">
           Publish
+        </s-button>
+      );
+    }
+    if ((check.id === "title" || check.id === "description") && canWrite) {
+      return (
+        <s-button commandFor={EDIT_MODAL_ID} command="--show">
+          Edit title and description
         </s-button>
       );
     }
@@ -182,16 +194,27 @@ export default function ProductHealthDetail() {
 
       {GROUPS.map((group) => {
         const checks = health.checks.filter((c) => c.group === group.id);
-        const earned = Math.round(checks.reduce((sum, c) => sum + c.earned, 0));
+        const summary = groups.find((g) => g.id === group.id);
+        const earned = summary?.earned ?? 0;
+        const percent = Math.round((earned / group.weight) * 100);
         return (
           <s-section key={group.id} heading={group.label}>
             <s-stack gap="base">
-              <LabeledProgress
+              <HorizontalBarChart
                 label={`${group.label} score`}
-                value={earned}
-                max={group.weight}
-                tone={scoreTone(Math.round((earned / group.weight) * 100))}
-                valueText={`${earned} / ${group.weight} points`}
+                max={100}
+                items={[
+                  {
+                    key: group.id,
+                    label:
+                      summary && summary.issueCount > 0
+                        ? plural(summary.issueCount, "issue")
+                        : "All checks pass",
+                    value: percent,
+                    tone: scoreTone(percent),
+                    valueText: `${earned} / ${group.weight} points`,
+                  },
+                ]}
               />
               <s-divider />
               {checks.map((check) => (
@@ -209,7 +232,7 @@ export default function ProductHealthDetail() {
         );
       })}
 
-      <s-section slot="aside" heading="Overview">
+      <s-section slot="aside" heading="Health score">
         <s-stack gap="base">
           <s-stack direction="inline" gap="small" alignItems="center">
             <s-thumbnail
@@ -219,11 +242,11 @@ export default function ProductHealthDetail() {
             />
             <StatusBadge status={product.status} />
           </s-stack>
-          <ScoreIndicator score={health.score} />
-          <s-stack gap="small-200">
-            <s-text>
+          <ScoreGauge score={health.score} label="Health score" size="medium" />
+          <s-stack gap="small-200" alignItems="center">
+            <s-text type="strong">
               {health.issues.length === 0
-                ? "All checks pass."
+                ? "All checks pass"
                 : `${plural(health.issues.length, "issue")} to fix`}
             </s-text>
             {health.issues.length > 0 && (
@@ -238,6 +261,23 @@ export default function ProductHealthDetail() {
             )}
           </s-stack>
         </s-stack>
+      </s-section>
+
+      <s-section slot="aside" heading="By area">
+        <HorizontalBarChart
+          label="Score by area"
+          max={100}
+          items={groups.map((g) => {
+            const percent = Math.round((g.earned / g.weight) * 100);
+            return {
+              key: g.id,
+              label: g.label,
+              value: percent,
+              tone: scoreTone(percent),
+              valueText: `${g.earned} / ${g.weight}`,
+            };
+          })}
+        />
       </s-section>
 
       <s-section slot="aside" heading="Quick actions">
@@ -259,6 +299,13 @@ export default function ProductHealthDetail() {
               {statusActionLabel(next)}
             </s-button>
           )}
+          <s-button
+            disabled={!canWrite}
+            commandFor={EDIT_MODAL_ID}
+            command="--show"
+          >
+            Edit title and description
+          </s-button>
           <s-button variant="tertiary" href={adminUrl} target="_top">
             View in Shopify Admin
           </s-button>
@@ -270,6 +317,16 @@ export default function ProductHealthDetail() {
       )}
       {canWrite && next && (
         <StatusModal product={product} next={next} checks={health.checks} />
+      )}
+      {canWrite && (
+        <ContentEditDialog
+          modalId={EDIT_MODAL_ID}
+          target={{
+            id: product.id,
+            title: product.rawTitle,
+            description: product.description,
+          }}
+        />
       )}
     </s-page>
   );

@@ -94,6 +94,37 @@ describe("loadOrdersSummary", () => {
     expect(summary.aggregate.byReason.CONTAINS_LOW_STOCK_ITEM).toBe(0);
   });
 
+  it("derives per-day counts in the shop timezone and the fulfillment mix", async () => {
+    mocks.getOrderCounts.mockImplementation(
+      async (_c: unknown, _now: Date, meta?: { timeZone?: string }) => {
+        if (meta) meta.timeZone = "Asia/Karachi";
+        return { today: count, unfulfilled: count };
+      },
+    );
+    mocks.getRecentOrdersSample.mockResolvedValue({
+      orders: [
+        lowStockOrder,
+        {
+          ...lowStockOrder,
+          id: "2",
+          createdAt: "2026-10-29T20:00:00Z",
+          fulfillmentStatus: "UNFULFILLED",
+        },
+      ],
+      capped: true,
+    });
+    const summary = await loadOrdersSummary(
+      client,
+      SHOP,
+      new MemoryTaggedCache(),
+      NOW,
+    );
+    expect(summary.timeZone).toBe("Asia/Karachi");
+    // Capped: only the day the oldest sampled order falls on onward.
+    expect(summary.perDay).toEqual([{ date: "2026-10-30", count: 2 }]);
+    expect(summary.fulfillmentMix).toEqual({ FULFILLED: 1, UNFULFILLED: 1 });
+  });
+
   it("is cached and reloaded after orders/create", async () => {
     const cache = new MemoryTaggedCache();
     await loadOrdersSummary(client, SHOP, cache, NOW);

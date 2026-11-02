@@ -16,9 +16,11 @@ import {
 import type { HealthCheck } from "../../lib/product-health/types";
 import { enumLabel } from "../../lib/presentation";
 import {
+  Acknowledgement,
   BeforeAfter,
   CharCounter,
   ResultBanner,
+  StepHeader,
   Warnings,
   fieldError,
 } from "./shared";
@@ -120,10 +122,12 @@ export function SeoModal({
 
         {showEdit && (
           <>
-            <s-text color="subdued">
-              Step 1 of 2 · Edit the search listing for {product.title}.
-              Suggestions are only a starting point.
-            </s-text>
+            <StepHeader
+              step={1}
+              of={2}
+              title="Edit the search listing"
+              detail={`For ${product.title}. Suggestions are only a starting point.`}
+            />
             <s-stack gap="small-300">
               <s-text-field
                 label="SEO title"
@@ -180,8 +184,12 @@ export function SeoModal({
 
         {!done && !showEdit && (
           <>
-            <s-text color="subdued">Step 2 of 2 · Review and confirm</s-text>
-            <s-paragraph>{describeSeoChange(product.title)}</s-paragraph>
+            <StepHeader
+              step={2}
+              of={2}
+              title="Review and confirm"
+              detail={describeSeoChange(product.title)}
+            />
             <BeforeAfter rows={rows} />
           </>
         )}
@@ -318,13 +326,10 @@ export function StatusModal({
                     ))}
                   </s-unordered-list>
                 </s-banner>
-                <s-divider />
-                <s-checkbox
+                <Acknowledgement
                   label="I understand these issues and want to publish anyway"
                   checked={acknowledged}
-                  onChange={(event) =>
-                    setAcknowledged(event.currentTarget.checked)
-                  }
+                  onChange={setAcknowledged}
                 />
               </>
             )}

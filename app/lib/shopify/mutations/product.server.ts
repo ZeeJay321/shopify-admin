@@ -5,6 +5,7 @@
  */
 
 import type {
+  ProductUpdateContentMutation,
   ProductUpdateSeoMutation,
   ProductUpdateStatusMutation,
 } from "../../../types/admin.generated";
@@ -26,6 +27,15 @@ const PRODUCT_UPDATE_STATUS = `#graphql
   mutation ProductUpdateStatus($product: ProductUpdateInput!) {
     productUpdate(product: $product) {
       product { id status }
+      userErrors { field message }
+    }
+  }
+`;
+
+const PRODUCT_UPDATE_CONTENT = `#graphql
+  mutation ProductUpdateContent($product: ProductUpdateInput!) {
+    productUpdate(product: $product) {
+      product { id title }
       userErrors { field message }
     }
   }
@@ -93,6 +103,35 @@ export async function setProductStatus(
   return { ok: true, data: { status: payload.product.status } };
 }
 
+/**
+ * Title and/or description (already-escaped HTML from `textToHtml`). Only
+ * the fields given are sent.
+ */
+export async function updateProductContent(
+  client: AdminGraphqlClient,
+  productId: string,
+  content: { title?: string; descriptionHtml?: string },
+): Promise<MutationResult<{ title: string }>> {
+  const id = toProductGid(productId);
+  const data = await runQuery<ProductUpdateContentMutation>(
+    client,
+    "Update product content",
+    PRODUCT_UPDATE_CONTENT,
+    { product: { id, ...content } },
+    { maxRetries: 1 },
+  );
+  const payload = data.productUpdate;
+  const error = mapProductUserErrors(payload?.userErrors ?? []);
+  if (error) return { ok: false, error };
+  if (!payload?.product) {
+    return {
+      ok: false,
+      error: { code: "not_found", detail: "no product returned" },
+    };
+  }
+  return { ok: true, data: { title: payload.product.title } };
+}
+
 /** Map productUpdate userErrors (no codes) by field path. */
 export function mapProductUserErrors(
   userErrors: ReadonlyArray<UserError>,
@@ -115,5 +154,12 @@ export function mapProductUserErrors(
     return { code: "validation", field: leaf, detail };
   }
   if (leaf === "status") return { code: "validation", field: "status", detail };
+  if (leaf === "title" || leaf === "descriptionHtml") {
+    return {
+      code: "validation",
+      field: leaf === "title" ? "title" : "description",
+      detail,
+    };
+  }
   return { code: "validation", field: "form", detail };
 }

@@ -40,7 +40,7 @@ export type HandlerOutcome = {
 
 export type IntentHandler = {
   /** Required scope, or null for non-writing intents (e.g. recheck). */
-  scope: "write_products" | "write_inventory" | null;
+  scope: "write_products" | "write_inventory" | "write_publications" | null;
   /** Mutating intents require `confirm=yes`. */
   requiresConfirmation: boolean;
   run(ctx: ActionContext): Promise<HandlerOutcome>;

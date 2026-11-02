@@ -1,4 +1,10 @@
+import type { LinksFunction } from "react-router";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import chartStyles from "./components/charts/charts.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: chartStyles },
+];
 
 export default function App() {
   return (

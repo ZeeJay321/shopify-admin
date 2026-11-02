@@ -8,6 +8,9 @@ export * from "./status";
 export * from "./inventory";
 export * from "./seo-batch";
 export * from "./messages";
+export * from "./content";
+export * from "./bulk";
+export * from "./fixes";
 
 /** Result of a write-action POST, as returned to the UI. */
 export type WriteActionResult =

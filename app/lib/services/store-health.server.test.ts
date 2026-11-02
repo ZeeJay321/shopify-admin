@@ -63,3 +63,14 @@ describe("loadStoreHealth (read-through cache)", () => {
     expect(getProductSample).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("loadStoreHealth sample", () => {
+  it("returns zeroed score buckets for an empty catalog", async () => {
+    const { sample } = await loadStoreHealth(
+      client,
+      SHOP,
+      new MemoryTaggedCache(),
+    );
+    expect(sample.scoreBuckets).toEqual([0, 0, 0, 0, 0]);
+  });
+});

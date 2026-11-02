@@ -1,19 +1,44 @@
+import { useState } from "react";
 import { useFetcher } from "react-router";
 import type { WriteActionResult } from "../../lib/actions";
 import { describeSeoBatch } from "../../lib/actions";
 import { SEO_BATCH_MAX } from "../../lib/config";
+import { BulkResults } from "./bulk-dialog";
 import { BeforeAfter, ResultBanner } from "./shared";
 
-const BATCH_MODAL = "seo-batch-modal";
+export const SEO_BATCH_MODAL = "seo-batch-modal";
+
+/** Button + dialog for a fixed set of products. */
+export function SeoBatchAction({ productIds }: { productIds: string[] }) {
+  const count = Math.min(productIds.length, SEO_BATCH_MAX);
+  return (
+    <>
+      <s-button commandFor={SEO_BATCH_MODAL} command="--show">
+        Apply suggested SEO ({count} product{count === 1 ? "" : "s"})
+      </s-button>
+      <SeoBatchDialog modalId={SEO_BATCH_MODAL} productIds={productIds} />
+    </>
+  );
+}
 
 /**
- * Readiness "missing SEO" batch: preview (server plans suggestions for up to
+ * "Missing SEO" batch: preview (server plans suggestions for up to
  * SEO_BATCH_MAX products, filling only missing fields) -> summary dialog ->
- * confirm -> per-product results. Not all-or-nothing.
+ * confirm -> per-product results. Not all-or-nothing. The preview reloads
+ * every time the dialog opens, for whichever products are passed in then.
  */
-export function SeoBatchAction({ productIds }: { productIds: string[] }) {
-  const preview = useFetcher<WriteActionResult>();
-  const apply = useFetcher<WriteActionResult>();
+export function SeoBatchDialog({
+  modalId,
+  productIds,
+}: {
+  modalId: string;
+  productIds: readonly string[];
+}) {
+  const [session, setSession] = useState(0);
+  const preview = useFetcher<WriteActionResult>({ key: `${modalId}-preview` });
+  const apply = useFetcher<WriteActionResult>({
+    key: `${modalId}-apply-${session}`,
+  });
   const ids = productIds.slice(0, SEO_BATCH_MAX);
 
   const items =
@@ -23,6 +48,7 @@ export function SeoBatchAction({ productIds }: { productIds: string[] }) {
   const applied = apply.data;
 
   const loadPreview = () => {
+    setSession((n) => n + 1);
     const form = new FormData();
     form.set("intent", "preview_seo_batch");
     for (const id of ids) form.append("productId", id);
@@ -50,11 +76,12 @@ export function SeoBatchAction({ productIds }: { productIds: string[] }) {
 
   return (
     <>
-      <s-button commandFor={BATCH_MODAL} command="--show" onClick={loadPreview}>
-        Apply suggested SEO ({ids.length} product{ids.length === 1 ? "" : "s"})
-      </s-button>
-
-      <s-modal id={BATCH_MODAL} heading="Apply suggested SEO" size="large">
+      <s-modal
+        id={modalId}
+        heading="Apply suggested SEO"
+        size="large"
+        onShow={loadPreview}
+      >
         <s-stack gap="base">
           {preview.state !== "idle" && (
             <s-spinner accessibilityLabel="Loading suggestions" />
@@ -62,16 +89,10 @@ export function SeoBatchAction({ productIds }: { productIds: string[] }) {
           {preview.data && !preview.data.ok && (
             <ResultBanner result={preview.data} />
           )}
-          {applied && <ResultBanner result={applied} />}
+          {applied && !applied.ok && <ResultBanner result={applied} />}
 
           {applied?.ok && applied.results ? (
-            <s-unordered-list>
-              {applied.results.map((r) => (
-                <s-list-item key={r.productId}>
-                  {r.ok ? "✓" : "✗"} {r.productTitle}: {r.message}
-                </s-list-item>
-              ))}
-            </s-unordered-list>
+            <BulkResults results={applied.results} />
           ) : (
             preview.state === "idle" &&
             items.length > 0 && (
@@ -108,11 +129,7 @@ export function SeoBatchAction({ productIds }: { productIds: string[] }) {
         </s-stack>
 
         {applied?.ok ? (
-          <s-button
-            slot="primary-action"
-            commandFor={BATCH_MODAL}
-            command="--hide"
-          >
+          <s-button slot="primary-action" commandFor={modalId} command="--hide">
             Done
           </s-button>
         ) : (
@@ -129,7 +146,7 @@ export function SeoBatchAction({ productIds }: { productIds: string[] }) {
         {!applied?.ok && (
           <s-button
             slot="secondary-actions"
-            commandFor={BATCH_MODAL}
+            commandFor={modalId}
             command="--hide"
           >
             Cancel

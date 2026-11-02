@@ -10,7 +10,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import { PageSkeleton } from "../components/ui";
+import { PageSkeleton, skeletonFor } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -25,9 +25,11 @@ export default function App() {
   const location = useLocation();
   // Skeleton only when moving to another page; same-page filter changes keep
   // their content and show inline loading instead (no layout jump).
-  const changingPage =
+  const target =
     navigation.state === "loading" &&
-    navigation.location.pathname !== location.pathname;
+    navigation.location.pathname !== location.pathname
+      ? navigation.location.pathname
+      : null;
 
   return (
     <AppProvider apiKey={apiKey}>
@@ -41,7 +43,7 @@ export default function App() {
         <s-link href="/app/orders">Orders</s-link>
         <s-link href="/app/readiness">Readiness</s-link>
       </s-app-nav>
-      {changingPage ? <PageSkeleton /> : <Outlet />}
+      {target ? <PageSkeleton variant={skeletonFor(target)} /> : <Outlet />}
     </AppProvider>
   );
 }

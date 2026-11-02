@@ -7,6 +7,28 @@ export type ReadinessProduct = ProductSnapshot & {
   handle: string;
   /** null when membership couldn't be loaded. */
   inAnyCollection: boolean | null;
+  /**
+   * Published to the checked sales channel (CheckConfig.channel); null when
+   * unknown. Unset when no channel is configured.
+   */
+  publishedToChannel?: boolean | null;
+};
+
+/** A sales channel (publication) the merchant can check against. */
+export type SalesChannel = {
+  /** Publication GID. */
+  id: string;
+  name: string;
+  isOnlineStore: boolean;
+  /** Products included in the publication (Shopify's count). */
+  productCount: number;
+  atLeast: boolean;
+};
+
+/** Per-run configuration handed to every check. */
+export type CheckConfig = {
+  /** Channel for the publishing check; null = Online Store (by URL). */
+  channel: { id: string; name: string } | null;
 };
 
 export type ReadinessCollection = {
@@ -29,6 +51,8 @@ export type AffectedResource = {
   id: string;
   title: string;
   handle: string;
+  /** What's wrong for this resource, e.g. "No SEO description". */
+  problem?: string;
 };
 
 export type ReadinessGroup =
@@ -50,7 +74,9 @@ export type StorefrontCheck = {
   group: ReadinessGroup;
   severity: CheckSeverity;
   weight: number;
-  evaluate(snapshot: StorefrontSnapshot): CheckEvaluation;
+  evaluate(snapshot: StorefrontSnapshot, config?: CheckConfig): CheckEvaluation;
+  /** Optional config-dependent name/description (e.g. the channel name). */
+  describe?(config: CheckConfig): { name: string; description: string };
 };
 
 export type CheckStatus = "pass" | "warn" | "fail" | "not_applicable";
@@ -78,4 +104,20 @@ export type ReadinessReport = {
   productsCapped: boolean;
   collectionCount: number | null;
   collectionsCapped: boolean;
+  /** Display rows for affected products, keyed by numeric id (phase 6). */
+  productIndex?: Record<string, ReadinessProductRow>;
+};
+
+/** What the affected-products table shows for one product. */
+export type ReadinessProductRow = {
+  id: string;
+  /** As stored in Shopify (may be empty). */
+  title: string;
+  handle: string;
+  vendor: string;
+  status: string;
+  imageUrl: string | null;
+  score: number;
+  /** Plain-text description, for the Edit dialog. */
+  description: string;
 };
